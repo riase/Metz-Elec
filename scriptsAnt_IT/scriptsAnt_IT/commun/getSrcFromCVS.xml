@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="getSrcFromCVS" default="make" basedir="../.">
+
+
+  <!-- *********************************************************************
+  Ce script permet de récupérer des sources archivés sous CVS
+
+  Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+		
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+
+  Ce script attend en paramètre :
+
+  OBLIGATOIRES
+	cvs.module : nom COMPLET du module CVS à récupérer contenant les livraisons
+
+  	cvs.tag : version du module à récupérer (LIV_2_1_14 par ex).
+
+  FACULTATIFS
+  	ExecDir						: Répertoire absolu d'exécution
+  	CvsTempDir					: Répertoire cible de l'extraction des sources CVS
+	cvs.login					: login pour se connecter à CVS. Par défaut adminDEV
+	cvs.server				: serveur hébergeant la base CVS. Par défaut hermescvs
+	cvs.repo					: repository où sont les sources. Par défaut /DEV
+	Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f getSrcFromCVS.xml -Dcvs.module=Developpement_dev\Hermes\src -Dcvs.tag=LIV_2_1_14
+
+	*********************************************************************
+	-->
+<target name="getLASTFromCVS">
+	<cvs cvsRoot="${cvs.root}" package="${cvs.module}" quiet="yes" dest="${cvs.dir}"/>
+	<echo file="${log.file}" append="true">
+		La dernière version de l'application ${cvs.module} a été récupérée
+	</echo>
+</target>
+
+<target name="getThisTagFromCVS">
+	<property name="curTag" value="${item}"/>
+	<cvs cvsRoot="${cvs.root}" package="${cvs.module}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+
+	<move todir="${cvs.dir}" overwrite="true">
+		<fileset dir="${checkout.dir}" />
+	</move>
+	<delete	dir="${checkout.dir}"/>
+
+	<echo file="${log.file}" append="true">
+		La version ${curTag} de l'application ${cvs.module} a été récupérée
+	</echo>
+</target>
+
+  <target name="init" depends="">
+
+	<!-- ExecDir -->
+	<if>
+		<not><isset property="${execDir}"/></not>
+	<then>
+		<property name="execDir" value="${basedir}"/>
+	</then>
+	</if>
+	<property name="root" value="${execDir}"/>
+
+	<!-- CvsProjetDir -->
+	<if>
+		<not><isset property="${CvsProjetDir}"/></not>
+	<then>
+		<property name="CvsProjetDir" value="${root}/tmp/projet"/>
+	</then>
+	</if>
+	<property name="cvs.dir" value="${CvsProjetDir}"/>
+	<property name="checkout.dir" value="${CvsProjetDir}/../checkout"/>
+
+	<if>
+		<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+		<then>
+			<property name="cvs.login" value="adminDEV"/>
+		</then>
+	</if>
+	<if>
+		<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+		<then>
+			<property name="cvs.server" value="hermescvs"/>
+		</then>
+	</if>
+	<if>
+		<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+		<then>
+			<property name="cvs.repo" value="/DEV"/>
+		</then>
+	</if>
+	<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+	<echo file="${log.file}" append="true">
+	La chaine de connexion a CVS est : ${cvs.root}
+	Les sources CVS proviennent de : ${cvs.module}
+	en version :  ${cvs.tag}
+	</echo>
+
+  </target>
+
+  <target name="getSrcFromCVS" depends="init">
+
+	<delete	dir="${cvs.dir}"/>
+	<mkdir	dir="${cvs.dir}"/>
+
+	<if>
+		<equals arg1="${cvs.tag}" arg2="LAST" />
+	<then>
+		<antcall target="getLASTFromCVS"/>
+	</then>
+	<else>
+		<foreach list="${cvs.tag}" target="getThisTagFromCVS" delimiter="+" param="item" inheritall="true"/>
+	</else>
+	</if>
+
+  </target>
+
+  <target name="make">
+    <antcall target="getSrcFromCVS"/>
+  </target>
+
+</project>

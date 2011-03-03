@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="unzip" default="make" basedir="../.">
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!-- *********************************************************************************************************
+	  Ce script permet de dézipper le fichier ${source.dir}/${context}.zip vers ${dest.dir} .
+
+	Paramètres obligatoires :
+		context : nom du zip (sans l'extension)
+		source.dir : répertoire où est archivé le zip
+		dest.dir : répertoire où va être dézippé le zip
+  **************************************************************************************************************
+  -->
+
+  <property name="log.dir" value="${source.dir}/tmpUnzip"/>
+  <property name="log.file" value="${log.dir}/unzip_${context}.log"/>
+
+  <!--
+  *********************************************************************
+  	Initialisations
+  *********************************************************************
+  -->
+  <target name="init" depends="">
+
+  	<!-- creation du répertoire et du fichier de log général -->
+  	<delete dir="${log.dir}"/>
+	<mkdir dir="${log.dir}"/>
+
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			Lancement du script de Unzip d'un binaire
+		*********************************************************************
+	</echo>
+	
+   	<!-- propriétés pour le déploiement automatique -->
+	<echo file="${log.file}" append="true">
+			Répertoire de sortie : ${dest.dir}
+	</echo>
+
+  </target>
+
+  <!--
+  *********************************************************************
+  ETAPE 1 :   	Unzip des binaires.
+   ********************************************************************
+  -->
+  <target name="unzip" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 1 :	Unzip du binaire.
+		*********************************************************************
+	</echo>
+	<delete	dir="${dest.dir}"/>
+	<mkdir	dir="${dest.dir}"/>
+	<unzip	src="${source.dir}/${context}.zip"
+		dest="${dest.dir}">
+	</unzip>
+	<echo file="${log.file}" append="true">
+		OK
+	</echo>
+  </target>
+
+  
+
+  <target name="make">
+    <antcall target="unzip"/>
+  </target>
+
+</project>

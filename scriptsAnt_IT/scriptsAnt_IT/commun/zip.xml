@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="zip" default="make" basedir="../.">
+
+  <!-- ********************************************************************************* -->
+  <!--		UTILISE POUR PACKAGER LES SOURCES DU MODULE SOURCE                             -->
+  <!-- ********************************************************************************* -->
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+  *********************************************************************
+    Ce script permet de packager l'export du module source.
+    
+    	Ce script attend en paramètres obligatoires :
+    		cvs.tag : version du module à récupérer.
+				cvs.context : nom du contexte de déploiement de l'application
+
+  	La chaîne de lancement est donc (par exemple)
+				call ant -f zip.xml -Dcvs.module=Developpement_dev\Hermes\tomcat\help -Dcvs.context=Help3018 -Dcvs.tag=LIV_3_0_18 -Dcvs.etape=1
+
+
+  *********************************************************************
+  -->
+  
+	<target name="getLASTFromCVS">
+		<cvs package="${source.dir}" dest="${cvs.dir}" quiet="yes"/>
+		<echo file="${log.file}" append="true">
+			La dernière version de l'application ${source.dir} a été récupérée
+		</echo>
+	</target>
+	
+	<target name="getThisTagFromCVS">
+		<property name="curTag" value="${item}"/>
+		<cvs package="${source.dir}" dest="${checkout.dir}" quiet="yes" tag="${curTag}" />
+			
+		<move todir="${cvs.dir}" overwrite="true">
+			<fileset dir="${checkout.dir}" />
+		</move>
+		<delete	dir="${checkout.dir}"/>
+	
+		<echo file="${log.file}" append="true">
+			La version ${curTag} de l'application ${source.dir} a été récupérée
+		</echo>
+	</target>
+  
+  <!--*********************************************************************
+  	Initialisations
+  *************************************************************************
+  -->
+  <target name="init" depends="">
+
+		<!-- ExecDir -->
+		<if>
+		<not><isset property="${execDir}"/></not>
+		<then>
+		<property name="execDir" value="${basedir}"/>
+		</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+
+		<!-- xmlCommunDir -->
+		<if>
+			<not><isset property="${xmlCommunDir}"/></not>
+		<then>
+			<property name="xmlCommunDir" value="${basedir}/scripts"/>
+		</then>
+		</if>
+		<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+
+		<property name="temp.dir" value="${root}/tmpZip"/>
+		<property name="cvs.dir" value="${temp.dir}/projet"/>
+		<property name="checkout.dir" value="${temp.dir}/checkout"/>
+
+		<!-- Indentifiant de l'exéction -->
+		<buildnumber file="${root}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+		<!-- propriétés pour le déroulement des étapes du script -->
+		<property name="etapeAutorisee" value="autorisee"/>
+		<property name="etapeNonAutorisee" value="nonAutorisee"/>
+		<property name="oui" value="Y"/>
+		<property name="non" value="N"/>
+
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<if>
+			<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+		<then>
+			<property name="property.file.dir" value="scripts"/>
+		</then>
+		</if>
+		<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+		<if>
+			<equals arg1="${property.file.present}" arg2="true" />
+			<then>
+				<echo>
+					Utilisation du fichier ${property.file}
+				</echo>
+				<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+			</then>
+			<else>
+				<echo>
+					Pas de fichier de propriétés dans ${root}\${property.file.dir}
+				</echo>
+			</else>
+		</if>
+
+		<property name="log.dir" value="${temp.dir}/log/${cvs.context}.${build.number}"/>
+		<property name="log.file" value="${log.dir}/zip.log"/>
+
+		<!-- creation du répertoire et du fichier de log général -->
+		<delete dir="${log.dir}"/>
+		<mkdir dir="${log.dir}"/>
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+			Lancement du script d'assemblage du module source ${cvs.module}
+		*********************************************************************
+		</echo>
+
+		<!-- les ressources particulières -->
+		<property name="exported.dir" value="${root}/${dest.dir}"/>
+		<property name="zip_name" value="${cvs.context}.zip"/>
+		<property name="source.dir" value="${cvs.module}"/>
+		<property name="build.dir" value="${cvs.dir}/${cvs.module}"/>
+
+		<!--
+			*********************************************************************
+			le résultat du script se trouve dans le répertoire exported.dir.
+			Il s'agit de : un zip
+
+			Seul le fichier zip doit être déployé
+			*******************************************************************
+		-->
+
+
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			Lancement du script de packaging
+			*********************************************************************
+			Parametres de lancement :
+				etape = ${cvs.etape}
+				cvs.module = ${cvs.module}
+				cvs.tag = ${cvs.tag}
+				Nom du zip : ${zip_name}
+			</echo>
+
+		<!--
+			les property qui n'auraient pas été valuées précédemment le sont à présent.
+			La valeur mise fait en sorte que l'étape est autorisée.
+		-->
+		<property name="etape1" value="${etapeAutorisee}"/>
+		<property name="etape2" value="${etapeAutorisee}"/>
+  </target>
+
+  <!--
+  *********************************************************************
+  ETAPE 1
+
+  Création d'une copie locale du module fonctionnel
+  On récupère uniquement les sources taggés
+  *********************************************************************
+	-->
+  <target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+ 			ETAPE 1 : Récupération du source de CVS
+		*********************************************************************
+	</echo>
+		
+	<if>
+ 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete	dir="${cvs.dir}"/>
+		<mkdir	dir="${cvs.dir}"/>
+		<delete	dir="${checkout.dir}"/>
+		
+		<ant antfile="${script.xml.commun.dir}/getSrcFromCVS.xml" inheritall="true">
+			<property name="CvsProjetDir" value="${cvs.dir}"/>
+		</ant>
+
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les sources de l'application ${cvs.module} n'ont pas été récupérées
+		</echo>
+	</else>
+	</if>
+  </target>
+
+    <!--
+  *********************************************************************
+  ETAPE 2 : Création du zip
+  *********************************************************************
+  -->
+  <target name="makeZip" depends="getFromCVS">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 2 :	Création du zip.
+		*********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	<then>
+		<!-- constitution du zip des batchs -->
+		
+		<trycatch>
+			<try>
+				<mkdir dir="${exported.dir}"/>
+			</try>
+			<catch>
+				<echo file="${log.file}" append="true">
+					Le répertoire ${exported.dir} existe déjà
+				</echo>
+			</catch>
+		</trycatch>
+		
+		<delete file="${exported.dir}/${zip_name}"/>
+		<zip destfile="${exported.dir}/${zip_name}">
+			<zipfileset dir="${build.dir}"/>
+		</zip>
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier Zip n'a pas été créé
+		</echo>
+	</else>
+	</if>
+  </target>
+
+
+  <target name="make">
+    <antcall target="makeZip"/>
+  </target>
+</project>

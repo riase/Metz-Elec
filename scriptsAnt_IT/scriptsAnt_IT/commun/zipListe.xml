@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="zipListe" default="make" basedir="../.">
+
+  <!-- ********************************************************************************* -->
+  <!--		UTILISE POUR ZIPPER UNE LISTE DE MODULES                                       -->
+  <!-- ********************************************************************************* -->
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+  *********************************************************************
+		Ce script permet de zipper une liste de modules passés en paramètres (checkout optionnel)
+
+		Ce script attend en paramètres obligatoires :
+		cvs.tag : version du module à récupérer.
+		contextes : nom des contextes streamserve à récupérer
+		cvs.server : nom du server CVS
+		cvs.login : login du compte CVS
+		cvs.repo : le repository concerné
+		cvs.modules.clients : chemin CVS des modules clients
+		lot : numéro du lot concerné
+
+	La chaîne de lancement est donc (par exemple)
+		call ant -f zipListe.xml -Dcvs.tag=LIV_7_0_08 -Dproperty.file=listeModules.properties -Dproperty.file.dir=cmd\parametres -DexecDir=%EXEC_DIR% -DxmlCommunDir=%XML_HOME%\commun
+
+  *********************************************************************
+  -->
+  <!--*********************************************************************
+  	Initialisations
+  *************************************************************************
+  -->
+  <target name="init" depends="">
+
+	<!-- ExecDir -->
+	<if>
+	<not><isset property="${execDir}"/></not>
+	<then>
+	<property name="execDir" value="${basedir}"/>
+	</then>
+	</if>
+	<property name="root" value="${execDir}"/>
+  
+	<!-- xmlCommunDir -->
+	<if>
+		<not><isset property="${xmlCommunDir}"/></not>
+	<then>
+		<property name="xmlCommunDir" value="${basedir}/scripts"/>
+	</then>
+	</if>
+	<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+
+	<property name="temp.dir" value="${root}/tmpZip"/>
+	<property name="cvs.dir" value="${temp.dir}/projet"/>
+	<property name="checkout.dir" value="${temp.dir}/checkout"/>
+
+	<!-- Indentifiant de l'exéction -->
+	<buildnumber file="${root}/build.number"/>
+	<tstamp>
+		<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+	</tstamp>
+
+	<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+	<if>
+		<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+	<then>
+		<property name="property.file.dir" value="scripts"/>
+	</then>
+	</if>
+	<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+	<if>
+		<equals arg1="${property.file.present}" arg2="true" />
+		<then>
+			<echo>
+	Utilisation du fichier ${property.file}
+			</echo>
+			<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+		</then>
+		<else>
+			<echo>
+		Pas de fichier de propriétés dans ${root}\${property.file.dir}
+			</echo>
+		</else>
+	</if>
+
+	<property name="log.dir" value="${temp.dir}/log/zipListe.${build.number}"/>
+	<property name="log.file" value="${log.dir}/zipListe.log"/>
+	
+	<!-- creation du répertoire et du fichier de log général -->
+	<delete dir="${log.dir}"/>
+	<mkdir dir="${log.dir}"/>
+	
+	<echo file="${log.file}" append="true">
+	*********************************************************************
+		Lancement du script de zip d'une liste de modules
+	*********************************************************************
+	</echo>
+	
+	<!--
+	  *********************************************************************
+		le résultat du script se trouve dans le répertoire exported.dir.
+	  *******************************************************************
+	-->
+	<!-- les ressources particulières -->
+	<property name="exported.dir" value="${root}"/>	
+	
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		Lancement du script de packaging
+		*********************************************************************
+		Parametres de lancement :
+			modules = ${modules}
+			cvs.tag = ${cvs.tag}
+			cvs.module.commun = ${cvs.module.commun}
+		</echo>
+  </target>
+
+  <!--
+  *********************************************************************
+  Récupération des différents modules listés dans le paramètre contextes
+  puis zip des différents modules
+  *********************************************************************
+	-->
+	<target name="makeZip" depends="init">
+	<!--Récupération des modules -->
+		<for list="${modules}" delimiter="," param="data">
+			<sequential>
+				<!-- Nom du contexte -->
+				<var name="contexte" value="@{data}" />
+				
+				<!-- Nom du module à récupérer -->
+				<if>
+					<not>
+						<isset property="{cvs.module.commun}" />
+					</not>
+					<then>
+						<var name="cvs.module" value="${cvs.module.commun}/@{data}" />
+					</then>
+					<else>
+						<var name="cvs.module" value="@{data}" />
+					</else>
+				</if>
+				
+				<echo file="${log.file}" append="true">
+	*********************************************************************
+	ETAPE 1 : Récupération des sources CVS de ${cvs.module}
+	*********************************************************************
+				</echo>
+				
+				<delete	dir="${cvs.dir}"/>
+				<mkdir	dir="${cvs.dir}"/>
+				<delete	dir="${checkout.dir}"/>
+		
+				<ant antfile="${script.xml.commun.dir}/getSrcFromCVS.xml" inheritall="true">
+					<property name="CvsProjetDir" value="${cvs.dir}"/>
+				</ant>
+				
+				<echo file="${log.file}" append="true">
+	*********************************************************************
+	ETAPE 2 : Création du zip pour @{data}.
+	*********************************************************************
+				</echo>
+
+				<!-- regle de nommage du zip si existe -->
+				<if>
+					<and>
+						<isset property="zip.regleNommage.regexp" />
+						<isset property="zip.regleNommage.replace" />
+					</and>
+				<then>
+					<echo file="${log.file}" append="true">
+			zip.regleNommage.regexp = ${zip.regleNommage.regexp}
+			zip.regleNommage.replace = ${zip.regleNommage.replace}
+					</echo>
+					<var name="zip.nom" unset="true"/>
+					<propertyregex property="zip.nom"
+												input="@{data}"
+												regexp="${zip.regleNommage.regexp}"
+												replace="${zip.regleNommage.replace}"
+												casesensitive="false" />
+				</then>
+				<else>
+					<echo file="${log.file}" append="true">
+			Le nom du module n'a pas de règle
+					</echo>
+					<var name="zip.nom" value="@{data}.zip" />
+				</else>
+				</if>
+				<delete file="${exported.dir}/${zip.dir.dest}/${zip.nom}"/>
+				<zip destfile="${exported.dir}/${zip.dir.dest}/${zip.nom}">
+					<zipfileset dir="${cvs.dir}/${cvs.module}"/>
+				</zip>
+
+				<!-- Réinitialisation de la variable contexte avec la valeur de départ -->
+				<var name="contexte" value="@{data}" />
+			</sequential>
+		</for>
+	</target>
+
+	<target name="make">
+		<antcall target="makeZip"/>
+	</target>
+</project>
