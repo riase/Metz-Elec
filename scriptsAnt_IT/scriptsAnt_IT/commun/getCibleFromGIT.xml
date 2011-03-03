@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <project name="getCibleFromGIT" default="make" basedir="../.">
 
-	<property name="git.tasks.macro" location="../../../macros/git-tasks.xml" />
+	<property name="git.tasks.macro" location="./macros/git-tasks.xml" />
 	<import file="${git.tasks.macro}" />
+		
 	<!-- Ajout d'un package pour utiliser le task unset -->
 	<taskdef name="unset" classname="ise.antelope.tasks.Unset" />
 
@@ -47,6 +48,7 @@ FACULTATIFS
 	<target name="init" depends="">
 
 		<!-- ExecDir -->
+		
 		<if>
 			<not>
 				<isset property="${execDir}" />
@@ -55,6 +57,7 @@ FACULTATIFS
 				<property name="execDir" value="${basedir}" />
 			</then>
 		</if>
+		
 		<property name="root" value="${execDir}" />
 
 		<!-- GITProjetDir -->
