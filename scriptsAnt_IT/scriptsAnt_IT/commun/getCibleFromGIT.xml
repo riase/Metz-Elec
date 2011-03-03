@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <project name="getCibleFromGIT" default="make" basedir="../.">
 
+	<property name="git.tasks.macro" location="../../../macros/git-tasks.xml" />
+	<import file="${git.tasks.macro}" />
 	<!-- Ajout d'un package pour utiliser le task unset -->
-	<taskdef name="unset" classname="ise.antelope.tasks.Unset"/>
+	<taskdef name="unset" classname="ise.antelope.tasks.Unset" />
 
-  <!-- *********************************************************************
+	<!-- *********************************************************************
   Ce script permet de récupérer des cibles archivées sous GIT
 
   Avant de lancer le script fixer les paramètres d'environnement.
 
 		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
 		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
-		set GITHOME=D:\Programs\WinGIT
+		set GITHOME=C:\msysgit\msysgit
 		
 		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%GITHOME%
 
@@ -33,7 +35,7 @@ FACULTATIFS
 	GIT.login					: login pour se connecter à GIT. Par défaut adminDEV
 	GIT.server				: serveur hébergeant la base GIT. Par défaut hermesGIT
 	GIT.repo					: repository où sont les sources. Par défaut /DEV
-	Ces trois paramètres peuvent être remplacé par un paramètre global (GIT.root=:pserver:${GIT.login}@${GIT.server}:${GIT.repo})
+	Ces trois paramètres peuvent être remplacé par un paramètre global (GIT.root=git://${GIT.server}/${GIT.repo})
 
 	La chaîne de lancement est donc (par exemple)
 
@@ -42,54 +44,57 @@ FACULTATIFS
 	*********************************************************************
 	-->
 
-  <target name="init" depends="">
+	<target name="init" depends="">
 
-	<!-- ExecDir -->
-	<if>
-		<not><isset property="${execDir}"/></not>
-	<then>
-		<property name="execDir" value="${basedir}"/>
-	</then>
-	</if>
-	<property name="root" value="${execDir}"/>
+		<!-- ExecDir -->
+		<if>
+			<not>
+				<isset property="${execDir}" />
+			</not>
+			<then>
+				<property name="execDir" value="${basedir}" />
+			</then>
+		</if>
+		<property name="root" value="${execDir}" />
 
-	<!-- GITProjetDir -->
-	<if>
-		<equals arg1="${GITProjetDir}" arg2="$${GITProjetDir}" />
-	<then>
-		<property name="GITProjetDir" value="${root}/tmp/projet"/>
-	</then>
-	</if>
-	<unset name="GIT.dir" /> <!-- Dans le cas où on fait appel consécutivement au script getCibleFromGIT.xml dans un autre script -->
-	<property name="GIT.dir" value="${GITProjetDir}"/>
-	
-	<if>
-		<equals arg1="${GIT.login}" arg2="$${GIT.login}" />
-		<then>
-			<property name="GIT.login" value="adminDEV"/>
-		</then>
-	</if>
-	<if>
-		<equals arg1="${GIT.server}" arg2="$${GIT.server}" />
-		<then>
-			<property name="GIT.server" value="hermesGIT"/>
-		</then>
-	</if>
-	<if>
-		<equals arg1="${GIT.repo}" arg2="$${GIT.repo}" />
-		<then>
-			<property name="GIT.repo" value="/DEV"/>
-		</then>
-	</if>
-	<property name="GIT.root" value=":pserver:${GIT.login}@${GIT.server}:${GIT.repo}"/>
-	<if>
-		<equals arg1="${GITVersion}" arg2="$${GITVersion}" />
-		<then>
-			<property name="GITVersion" value="LAST"/>
-		</then>
-	</if>
+		<!-- GITProjetDir -->
+		<if>
+			<equals arg1="${GITProjetDir}" arg2="$${GITProjetDir}" />
+			<then>
+				<property name="GITProjetDir" value="${root}/tmp/projet" />
+			</then>
+		</if>
+		<unset name="GIT.dir" />
+		<!-- Dans le cas où on fait appel consécutivement au script getCibleFromGIT.xml dans un autre script -->
+		<property name="GIT.dir" value="${GITProjetDir}" />
 
-	<echo file="${log.file}" append="true">
+		<if>
+			<equals arg1="${GIT.login}" arg2="$${GIT.login}" />
+			<then>
+				<property name="GIT.login" value="adminDEV" />
+			</then>
+		</if>
+		<if>
+			<equals arg1="${GIT.server}" arg2="$${GIT.server}" />
+			<then>
+				<property name="GIT.server" value="hermesGIT" />
+			</then>
+		</if>
+		<if>
+			<equals arg1="${GIT.repo}" arg2="$${GIT.repo}" />
+			<then>
+				<property name="GIT.repo" value="/DEV" />
+			</then>
+		</if>
+		<property name="GIT.root" value="git://${GIT.server}/${GIT.repo}" />
+		<if>
+			<equals arg1="${GITVersion}" arg2="$${GITVersion}" />
+			<then>
+				<property name="GITVersion" value="LAST" />
+			</then>
+		</if>
+
+		<echo file="${log.file}" append="true">
 	La chaine de connexion a GIT est : ${GIT.root}
 	Les sources GIT proviennent de : ${GIT.module}
 	en version (tag): ${GITVersion} 
@@ -100,25 +105,28 @@ FACULTATIFS
 
 	<target name="getCibleFromGIT" depends="init">
 
-		<delete	dir="${GIT.dir}"/>
-		<mkdir	dir="${GIT.dir}"/>
+		<delete dir="${GIT.dir}" />
+		<mkdir dir="${GIT.dir}" />
+		<!-- Pour le moment on ne gère que les checkouts de la branche stable et pas les tags -->
+		<git-clone-pull repository="${GIT.root}" dest="${GIT.dir}" />
 
-	<if>
-		<equals arg1="${GITVersion}" arg2="LAST" />
-		<then>
-			<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}"/>
-		</then>
-		<else>
-			<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}" tag="${GITVersion}"/>
-		</else>
-	</if>
+			<!--
+		<if>
+			<equals arg1="${GITVersion}" arg2="LAST" />
+			<then>
+				<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}" />
+			</then>
+			<else>
+				<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}" tag="${GITVersion}" />
+			</else>
+		</if>
+			-->
 
-	
 	</target>
 
 
 	<target name="make">
-		<antcall target="getCibleFromGIT"/>
+		<antcall target="getCibleFromGIT" />
 	</target>
 
 </project>
