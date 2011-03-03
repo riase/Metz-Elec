@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="tagdifArchi" default="make" basedir="..">
+
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+   *********************************************************************
+    Ce sript permet de mettre un label ("tag") sur les sources de l'EDK dans CVS
+    Ceci comprend :
+       - les sources des packages communs (java + web)
+       - les sources des habilitations (java +web)
+       - les sources des editions (java +web)
+       - les openTools (map4j)
+       - les taglibs
+       - le fichier de déploiement web.xml
+       - les fichiers SQL de création des tables, séquences, etc. de l'EDK.
+
+   Avant de tagger une mise à jour de la copie locale est faite (par un nouveau checkout)
+
+   Ce script attend en paramètre :
+
+   OBLIGATOIRES
+     cvs.branche		: nom de la branche à tagger, TRONC si c'est le tronc.
+     cvs.tag				: nom du tag à mettre sur les sources
+
+   FACULTATIFS
+
+     cvs.login			: nom du user pour la connexion à CVS. Par défaut ce paramètre vaut adminARCHI
+     cvs.server 		: nom du serveur sur lequel se trouve la base CVS. Par défaut hermescvs
+     cvs.repo			: nom du repository CVS. Par défaut DEV
+   Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+     etape 				: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+
+   Avant de lancer le script fixer les paramètres d'environnement.
+
+   La chaîne de lancement est par exemple :
+
+   set JAVA_HOME=D:\java\softs\jdk1.3.1_03
+   set ANT_HOME=D:\java\softs\ant\apache-ant-1.5.3-1
+   set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin
+
+   ant -f taggerEDK.xml -Dcvs.tag=Livraison_25072003 -Dcvs.branche=DEV_3_0
+     [ -Dcvs.login=adminARCHI -Dcvs.serveur=hermescvs -Dcvs.repo=/DEV -Detape=2 ]
+
+   *********************************************************************
+   -->
+
+  <property name="cvs.tronc" value="TRONC"/>
+
+  <property name="root" value="${basedir}"/>
+  <property name="livraison.dir" value="${root}/livraison"/>
+  <property name="ressources.dir" value="${root}/ressources"/>
+  <property name="lib.dir" value="${root}/lib"/>
+  <property name="build.dir" value="${root}/classes"/>
+
+  <property name="tmp.dir" value="${root}/tmp"/>
+
+  <property name="cvs.module.source" value="HermesArchi"/>
+
+  <property name="cvs.dir" value="${tmp.dir}/checkout"/>
+	<property name="jar.dir" value="${cvs.dir}/${cvs.module.source}/lib"/>
+	<property name="source.dir" value="${cvs.dir}/${cvs.module.source}/src"/>
+	<property name="properties.dir" value="${cvs.dir}/${cvs.module.source}/properties"/>
+	<property name="map4j.dir" value="${cvs.dir}/${cvs.module.source}/map4j"/>
+	<property name="web.dir" value="${cvs.dir}/${cvs.module.source}/tomcat/hermes"/>
+  <property name="sql.dir" value="${cvs.dir}/${cvs.module.source}/sql"/>
+  
+  <property name="batch.dir" value="${cvs.dir}/${cvs.module.source}/src/batch"/>
+	<property name="test.dir" value="${cvs.dir}/${cvs.module.source}/src/test"/>
+  <property name="scripts.dir" value="${cvs.dir}/${cvs.module.source}/scripts"/>
+
+  <!-- propriétés pour le déroulement des étapes du script -->
+  <property name="etapeAutorisee" value="autorisee"/>
+  <property name="etapeNonAutorisee" value="nonAutorisee"/>
+  <property name="oui" value="Y"/>
+
+
+  <!-- initialisation -->
+  <target name="init">
+
+    <fail message="la propriété cvs.tag est obligatoire.">
+      <condition>
+        <not><isset property="cvs.tag"/></not>
+      </condition>
+    </fail>
+    <property name="tag.dir" value="${tmp.dir}/${cvs.tag}"/>
+
+    <buildnumber file="${root}/buildTagdif.number"/>
+
+    <!-- creation du répertoire et du fichier de log général -->
+    <property name="log.dir" value="${tag.dir}/${build.number} - tagdif ${cvs.tag}-${cvs.previous.tag}"/>
+    <property name="log.file" value="${log.dir}/taggerEDKDEV.log"/>
+    <mkdir dir="${log.dir}"/>
+
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      Lancement du script de différence des tag de la couche EDK de Hermes
+      *********************************************************************
+    </echo>
+
+    <if>
+      <equals arg1="${cvs.tag}" arg2="$${cvs.tag}"/>
+      <then>
+        <input message="tag derniere version (VX)?" addproperty="cvs.tag"/>
+      </then>
+    </if>
+
+    <if>
+      <equals arg1="${cvs.previous.tag}" arg2="$${cvs.previous.tag}"/>
+      <then>
+        <input message="tag precedente version (VX) (derniere version = ${cvs.tag}) ?" addproperty="cvs.previous.tag"/>
+      </then>
+    </if>
+
+    <!-- connexion à CVS -->
+
+    <if>
+      <equals arg1="${cvs.login}" arg2="$${cvs.login}"/>
+      <then>
+        <property name="cvs.login" value="adminARCHI"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.server}" arg2="$${cvs.server}"/>
+      <then>
+        <property name="cvs.server" value="hermescvs"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.repo}" arg2="$${cvs.repo}"/>
+      <then>
+        <property name="cvs.repo" value="/DEV"/>
+      </then>
+    </if>
+    <property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+    <echo file="${log.file}" append="true">
+      Chaine de connexion à CVS : ${cvs.root}
+      Module : ${cvs.module.source}
+      dernier Tag : ${cvs.tag}
+      precedent tag : ${cvs.previous.tag}
+    </echo>
+    <echo>
+      Chaine de connexion à CVS : ${cvs.root}
+      Module : ${cvs.module.source}
+      dernier Tag : ${cvs.tag}
+      precedent tag : ${cvs.previous.tag}
+    </echo>
+    <input message="OK pour comparer? (Y/N)"
+           addproperty="comparer.ok"/>
+    <fail>
+      <condition>
+        <equals arg1="${comparer.ok}" arg2="N" casesensitive="false"/>
+      </condition>
+    </fail>
+
+  </target>
+
+
+  <target name="tagdif" >
+    <if>
+      <equals arg1="${cvs.tag}" arg2="LAST"/>
+      <then>
+        <tstamp>
+          <format property="today" pattern="yyyy-MM-dd HH:mm"/>
+        </tstamp>
+        <cvstagdiff cvsRoot="${cvs.root}"
+                package="${cvs.module.source}/map4j/skeleton ${cvs.module.source}/mapping ${cvs.module.source}/src ${cvs.module.source}/tomcat ${cvs.module.source}/sql"
+                destfile="${log.dir}/tagdiff ${cvs.tag}-${cvs.previous.tag}.xml"
+                starttag="${cvs.previous.tag}"
+                enddate="${today}"
+        />    
+      </then>
+      <else>
+        <cvstagdiff cvsRoot="${cvs.root}"
+                package="${cvs.module.source}"
+                destfile="${log.dir}/tagdiff ${cvs.tag}-${cvs.previous.tag}.xml"
+                starttag="${cvs.previous.tag}"
+                endTag="${cvs.tag}"
+        />
+      </else>
+    </if>
+
+
+    <style in="${log.dir}/tagdiff ${cvs.tag}-${cvs.previous.tag}.xml" out="${log.dir}/tagdiff ${cvs.tag}-${cvs.previous.tag}.html"  style="${ant.home}/etc/tagdiff.xsl">
+          <param name="title" expression="Ant Diff"/>
+          <param name="module" expression="ant"/>
+          <param name="cvsweb" expression="http://cvs.apache.org/viewcvs/"/>
+    </style>
+  </target>
+
+  <target name="make" depends="init">
+    <antcall target="tagdif"/>
+  </target>
+</project>

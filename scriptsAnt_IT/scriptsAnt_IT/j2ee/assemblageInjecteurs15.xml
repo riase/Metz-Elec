@@ -1,0 +1,756 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="integrationInjecteurs" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!-- Ajout d'un package pour utiliser le task XML -->
+	 <taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"/>
+
+	<!-- *********************************************************************
+	Ce script permet de packager les injecteurs avant déploiement.
+
+	Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+		cvs.module 		: nom COMPLET du module CVS à récupérer
+		cvs.tag 			: version du module à récupérer. Si la valeur vaut LAST alors c'est la dernière version
+		etape 				: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+		context 			: nom du contexte de paramétrage du batch (= sous répertoire du paramétrage)
+										Utilisé aussi pour constituer les noms des fichers zip. Valeur par défaut : batchsefluid
+		debug 				: "Y" pour déployer les batchs en mode debug
+
+	OPTIONNELS
+		versionOracle : version d'Oracle à utiliser.
+		librairies.specifiques	: liste des jar à inclure dans le zip (autre que ceux dans le rép. lib)
+
+		cvs.login				: login pour se connecter à CVS. Par défaut adminDEV
+		cvs.server			: serveur hébergeant la base CVS. Par défaut lausanne
+		cvs.repo				: repository où sont les sources. Par défaut /DEV
+		Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+		srcInjecteurs.dir		: répertoire relatif où sont les fichiers source java. Par défaut : src
+		srcproperties.dir		: répertoire relatif où sont les fichiers properties. Par défaut : src
+	
+		property.file		: fichier avec toutes les properties de lancement du script. Prend le dessus sur les paramètres passé par la ligne de commande
+		property.file.dir : répertoire où se trouve property.file. Par défaut, ${root}\scripts
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f integrationInjecteurs.xml -Dcontext=hermes -Dcvs.module=Developpement_dev/Hermes -Dcvs.-Dcvs.tag=LAST
+		 [ -Detape=3 -Ddeploy=Y]
+
+	Pour que le script fonctionne, le répertoire de paramétrage (${parametrage.dir})
+	doit contenir les ressources suivantes :
+
+		fichiers properties :
+			framework2.properties
+			hermes.properties, hermes2.properties
+
+		fichiers xml
+			uem.xml, gedia.xml ou reseipc.xml
+
+	*********************************************************************
+	-->
+
+
+	<target name="getLASTFromCVS">
+			<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${cvs.dir}"/>
+			<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcInjecteurs.dir}" quiet="yes" dest="${cvs.dir}"/>
+			<cvs cvsRoot="${cvs.root}" package="${cvs.module}/properties" quiet="yes" dest="${cvs.dir}"/>
+			<cvs cvsRoot="${cvs.root}" package="${cvs.module}/lib" quiet="yes" dest="${cvs.dir}"/>
+			<cvs cvsRoot="${cvs.root}" package="${cvs.module}/scripts" quiet="yes" dest="${cvs.dir}"/>
+			<echo file="${log.file}" append="true">
+				La dernière version de l'application ${cvs.module} a été récupérée
+			</echo>
+	</target>
+	
+	<target name="getThisTagFromCVS">
+		<property name="curTag" value="${item}"/>
+		<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcInjecteurs.dir}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/properties" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/lib" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/scripts" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<move todir="${cvs.dir}" overwrite="true">
+			<fileset dir="${checkout.dir}" />
+		</move>
+		<delete	dir="${checkout.dir}"/>
+		<echo file="${log.file}" append="true">
+			La version ${cvs.tag} de l'application ${cvs.module} a été récupérée
+		</echo>
+	</target>
+
+	<target name="majFichierParametrageXML">
+		<!-- le fichier xml est éventuellement spécifique à l'environnement cible -->
+		<available file="${resources.dir}/${societe}.xml" property="present" />
+		<if>
+			<equals arg1="${present}" arg2="true" />
+			<then>
+				<copy file="${resources.dir}/${societe}.xml" todir="${properties.dir}" overwrite="true" />
+				<echo file="${log.file}" append="true">
+					Le fichier ${societe}.xml a été écrasé
+				</echo>
+			</then>
+		</if>
+
+	</target>
+
+	<!--
+	*********************************************************************
+		Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+		<!-- ExecDir -->
+			<if>
+		<not><isset property="${execDir}"/></not>
+			<then>
+		<property name="execDir" value="${basedir}"/>
+			</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+
+
+		<property name="temp.dir" value="${root}/tmp"/>
+		<property name="cvs.dir" value="${temp.dir}/projet"/>
+		<property name="projet.dir" value="${cvs.dir}"/>
+		<property name="checkout.dir" value="${temp.dir}/checkout"/>
+
+		<buildnumber file="${root}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+		<!-- Le répertoire de log et le fichier log du script -->
+		<property name="log.dir" value="${temp.dir}/log/injecteurs/${context}.${build.number}"/>
+		<property name="log.file" value="${log.dir}/integrationInjecteurs.log"/>
+		<property name="properties.dir" value="${temp.dir}/properties"/>
+
+
+		<!-- creation du répertoire et du fichier de log général -->
+		<delete dir="${log.dir}"/>
+			<mkdir dir="${log.dir}"/>
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+		Lancement du script d'intégration
+		*********************************************************************
+		</echo>
+
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<if>
+			<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+		<then>
+			<property name="property.file.dir" value="scripts"/>
+		</then>
+		</if>
+		<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+		<if>
+			<equals arg1="${property.file.present}" arg2="true" />
+			<then>
+				<echo file="${log.file}" append="true">
+		Utilisation du fichier ${property.file}
+				</echo>
+				<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+			</then>
+			<else>
+				<echo file="${log.file}" append="true">
+			Pas de fichier de propriétés dans ${root}\${property.file.dir}
+				</echo>
+			</else>
+		</if>
+		
+		<!--
+		*********************************************************************
+		le résultat du script se trouve dans le répertoire exported.dir.
+		Il s'agit d'un jar et d'un zip
+		*******************************************************************
+		-->
+		<property name="app_jar" value="hermesInjecteurs.jar"/>
+		
+		<!-- propriétés pour le déroulement des étapes du script -->
+		<property name="oui" value="Y"/>
+		<property name="non" value="N"/>
+		<property name="etapeAutorisee" value="autorisee"/>
+		<property name="etapeNonAutorisee" value="nonAutorisee"/>
+		<property name="exported.dir" value="${root}/injecteurs/${context}"/>
+		<property name="resources.dir" value="${root}/parametrage/injecteurs/${context}"/>
+		<!-- connexion à CVS -->
+		<if>
+			<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+			<then>
+				<property name="cvs.login" value="adminDEV"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+			<then>
+				<property name="cvs.server" value="hermescvs"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+			<then>
+				<property name="cvs.repo" value="/DEV"/>
+			</then>
+		</if>
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+		<echo file="${log.file}" append="true">
+			connexion à CVS = ${cvs.root}
+		</echo>
+
+		<!-- récuperation du paramétrage XML spécifique -->
+		<available file="${resources.dir}/parametrageXML.properties" property="parametrageXML.present" />
+		<if>
+			<equals arg1="${parametrageXML.present}" arg2="true" />
+			<then>
+				<loadproperties srcFile="${resources.dir}/parametrageXML.properties"/>
+			</then>
+			<else>
+				<fail message="le fichier ${resources.dir}/parametrageXML.properties est introuvable"/>
+			</else>
+		</if>
+		<property name="app_zip" value="${exported.dir}/${context}Injecteurs.zip"/>
+
+		<!-- librairies à inclure -->
+		<if>
+			<not><isset property="${librairies.specifiques}"/></not>
+			<then>
+				<property name="librairies.specifiques" value="${none}"/>
+			</then>
+		</if>
+		<echo file="${log.file}" append="true">
+			librairies.specifiques = ${librairies.specifiques}
+		</echo>
+
+		<!-- Debug -->
+		<if>
+			<not><isset property="${debug}"/></not>
+			<then>
+				<property name="debug" value="${none}"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${debug}" arg2="${oui}"/>
+			<then>
+				<property name="FrameworkJar" value="frameworkDebug.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterpriseDebug.jar"/>
+				<property name="HermesArchiJar" value="HermesArchiDebug.jar"/>
+				<property name="efluidEDKJar" value="efluidEDKDebug.jar"/>
+			</then>
+			<else>
+				<property name="FrameworkJar" value="framework.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterprise.jar"/>
+				<property name="HermesArchiJar" value="HermesArchi.jar"/>
+				<property name="efluidEDKJar" value="efluidEDK.jar"/>
+			</else>
+		</if>
+
+		<!--
+		*********************************************************************
+		librairies nécessaires pour la compilation.
+		Le lecteur I doit être mappé sur
+			Zurich\Java à Paris,
+			Chablis\Java à Metz
+		*********************************************************************
+		-->
+		<property name="lib.dir" value="${projet.dir}/${lib.module}"/>
+		<property name="source.dir" value="${projet.dir}/${cvs.module}/${srcInjecteurs.dir}"/>
+		<property name="build.dir" value="${projet.dir}/${cvs.module}/classes"/>
+
+		
+
+	
+		<if>
+			<or>
+				<equals arg1="${jdk.version}" arg2="" />
+				<equals arg1="${jdk.version}" arg2="1.4" />
+			</or>
+			<then>
+				<property name="jdk.home" value="${env.JAVA_HOME}"/>
+				<property name="framework.home" value="${lib.dir}/hermesArchi/lib"/>
+				<property name="hermesArchi.home" value="${lib.dir}/hermesArchi/lib"/>
+				<property name="efluidEDK.home" value="${lib.dir}/efluidEDK/lib"/>
+			</then>
+			<else>
+				<property name="framework.home" value="${lib.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="hermesArchi.home" value="${lib.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="efluidEDK.home" value="${lib.dir}/efluidEDK/lib${jdk.version}"/>
+			</else> 
+		</if>
+		
+		<echo> env.JAVA_HOME = ${env.JAVA_HOME}</echo>
+		<echo> JAVA_HOME = ${jdk.home}</echo>
+	
+		
+<echo file="${log.file}" append="true">
+- framework.home = ${framework.home}
+- hermesArchi.home = ${hermesArchi.home}
+</echo>
+		<property name="ldap.home" value="I:/ldap"/>
+
+		<!-- Version Oracle -->
+		<if>
+			<not><isset property="${versionOracle}"/></not>
+			<then>
+				<property name="versionOracle" value="9.2.0.1"/>
+			</then>
+		</if>
+		<property name="oracle.home" value="I:/Oracle/${versionOracle}"/>
+
+		<!-- Répertoire additionnel pour les batchs : xerces + jsaper + axis + ... -->
+		<property name="script.batch.dir" value="${projet.dir}/${cvs.module}/scripts/extraction"/>
+		
+		
+				<delete dir="${temp.dir}/tmplibSpecifiques"/>
+		<mkdir dir="${temp.dir}/tmplibSpecifiques"/>
+
+<echo file="${log.file}" append="true">
+- librairies.specifiques.dir = ${temp.dir}/tmplibSpecifique
+- librairies.specifiques = ${librairies.specifiques}
+</echo>	
+		<property name="librairies.jar.temp" value="${temp.dir}/tmplibSpecifiques"/>
+<echo file="${log.file}" append="true">
+- librairies.jar.temp = ${librairies.jar.temp}
+</echo>			
+
+		
+		<copy todir="${librairies.jar.temp}"  overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques}"/>
+		</copy>
+		
+		<property name="librairies.jar.inj.temp" value="${librairies.jar.temp}/librairiesSpecifiquesInjecteurs"/>
+		
+		<delete dir="${librairies.jar.inj.temp}"/>
+		<mkdir dir="${librairies.jar.inj.temp}"/>
+		
+		<copy todir="${librairies.jar.inj.temp}"  overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques.inj}"/>
+		</copy>
+		
+		<if>
+			<or>
+				<equals arg1="${contexthermesobjetmetier.dir}" arg2="$${contexthermesobjetmetier.dir}" />
+				<equals arg1="${nomJarObjetsMetier}" arg2="$${nomJarObjetsMetier}" />
+			</or>
+			<then> <!-- Conservation de la compatibilité ascendante pour l'assemblage des Injecteurs efluid -->
+				<copy file="${root}/application/${contexthermesobjetmetier}/HermesObjetsMetier.jar" todir="${librairies.jar.inj.temp}"/> 
+			</then>
+			<else> <!-- Gestion de l'assemblage des Injecteurs pour une application autre que efluid -->
+				<property name="jarObjetsMetier.dir" value="${root}/${contexthermesobjetmetier.dir}/${contexthermesobjetmetier}/" />
+				<copy file="${jarObjetsMetier.dir}/${nomJarObjetsMetier}.jar" todir="${librairies.jar.inj.temp}"/>
+			</else>
+		</if>
+		
+		<path id="project.class.path">
+			<fileset dir="${librairies.jar.temp}">
+				<include name="**/*.jar"/>
+			</fileset> 
+			
+			<fileset dir="${hermesArchi.home}">
+				<include name="**/*.jar"/>
+			</fileset> 
+			
+		    <fileset dir="${efluidEDK.home}">
+				<include name="**/*.jar"/>
+			</fileset>
+			
+			<fileset dir="${framework.home}">
+				<include name="**/*.jar"/>
+			</fileset>
+			
+			<fileset dir="${ldap.home}">
+				<include name="*.jar"/>
+			</fileset>
+			
+			<fileset dir="${oracle.home}">
+				<include name="*.jar"/>
+			</fileset>	
+		</path>	
+
+		<!--Etapes du script. A executer dans l'ordre -->
+		<echo file="${log.file}" append="true">
+		Etape de démarrage du script : ${etape}
+		</echo>
+		<switch value="${etape}">
+			<case value="2">
+				<property name="etape1" value="${etapeNonAutorisee}" />
+			</case>
+			<case value="3">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+			</case>
+			<case value="4">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+				<property name="etape3" value="${etapeNonAutorisee}"/>
+			</case>
+			<case value="5">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+				<property name="etape3" value="${etapeNonAutorisee}"/>
+				<property name="etape4" value="${etapeNonAutorisee}"/>
+			</case>
+			<default>
+				<echo file="${log.file}" append="true">
+					=> Cas par défaut. Toutes les étapes du script seront exécutées
+				</echo>
+			</default>
+		</switch>
+		<!--
+		les property qui n'auraient pas été valuées précédemment le sont à présent.
+		La valeur mise fait en sorte que l'étape est autorisée.
+		-->
+		<property name="etape1" value="${etapeAutorisee}"/>
+		<property name="etape2" value="${etapeAutorisee}"/>
+		<property name="etape3" value="${etapeAutorisee}"/>
+		<property name="etape4" value="${etapeAutorisee}"/>
+		<property name="etape5" value="${etapeAutorisee}"/>
+
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 1
+
+	Création d'une copie locale du module fonctionnel
+	On récupère uniquement les sources taggés
+
+	N.B.
+	le user de connexion à CVS est un paramètre du script.
+	idem pour le nom du serveur CVS
+	le tag "cvs.tag" est un paramètre du script. Si ce tag vaut LAST alors
+	c'est la dernière version de chaque fichier qui est récupérée.
+
+	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 1 : Récupération du source de CVS
+		*********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete	dir="${cvs.dir}"/>
+		<mkdir	dir="${cvs.dir}"/>
+		
+		<if>
+			<equals arg1="${cvs.tag}" arg2="LAST" />
+		<then>
+			<antcall target="getLASTFromCVS"/>
+		</then>
+		<else>
+			<foreach list="${cvs.tag}" target="getThisTagFromCVS" delimiter="+" param="item" inheritall="true" />
+		</else>
+		</if>
+		
+		<!-- il faut supprimer les classes de test unitaires -->
+		<delete includeEmptyDirs="true" >
+			<fileset dir="${source.dir}" caseSensitive="yes">
+				<include name="**/test/**/*.*" />
+			</fileset>
+			<fileset dir="${source.dir}" caseSensitive="yes">
+				<include name="**/jeudetest/**/*.*" />
+			</fileset>
+		</delete>
+		
+		<echo file="${log.file}" append="true">
+			les classes de test unitaires ont été supprimées
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les sources de l'application ${cvs.module} n'ont pas été récupérées
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 2 : Compilation des sources java de ${source.dir} vers ${build.dir}
+	Le répertoire cible de compilation doit être créé d'abord.
+	*********************************************************************
+	-->
+	<target name="compilation" depends="getFromCVS">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 2 :	Compilation des sources.
+		*********************************************************************
+	</echo>
+	
+	
+<echo file="${log.file}" append="true">
+jdk.version = ${jdk.version}
+jdk.home = ${jdk.home} 
+lib.dir = ${projet.dir}/DEV/librairies
+framework.home = ${framework.home}
+hermesArchi.home = ${hermesArchi.home}
+efluidEDK.home = ${efluidEDK.home}
+src.dir= ${source.dir}
+</echo>
+	<if>
+		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	<then>
+		<!-- <delete dir="${build.dir}"/> -->
+		<mkdir dir="${build.dir}"/>
+
+		
+		<if>
+			<equals arg1="${debug}" arg2="${oui}"/>
+		<then>
+			<javac srcdir="${source.dir}" 
+				   destdir="${build.dir}" debug="on"
+				   fork="yes"
+				   executable="${jdk.home}/bin/javac.exe"
+				   compiler="javac${jdk.version}"
+				   memoryInitialSize="512m"
+				   memoryMaximumSize="1024m"
+				   nowarn="yes">
+				<classpath refid="project.class.path"/>
+			</javac>
+		</then>
+		<else>
+			<javac srcdir="${source.dir}" 
+				   destdir="${build.dir}"
+				   fork="yes"
+				   executable="${jdk.home}/bin/javac.exe"
+				   compiler="javac${jdk.version}"
+				   memoryInitialSize="512m"
+				   memoryMaximumSize="1024m"
+				   nowarn="yes">
+				<classpath refid="project.class.path"/>
+			</javac>
+		</else>
+		</if>
+
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les sources n'ont pas été compilés
+		</echo>
+	</else>
+	</if>
+	</target>
+	
+	<!--
+	*********************************************************************
+	ETAPE 3 : Récuperation des properties.
+	 ********************************************************************
+	-->
+	<target name="properties" depends="compilation">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 3 :	Récuperation des properties.
+		 *********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete	dir="${properties.dir}"/>
+		<mkdir	dir="${properties.dir}"/>
+
+		<!-- les fichiers sources -->
+		<copy todir="${properties.dir}">
+			<fileset dir="${source.dir}" excludes="**/*.java"/>
+		</copy>
+		<copy todir="${properties.dir}">
+			<fileset dir="${projet.dir}\${cvs.module}\properties" />
+		</copy>
+
+		<!-- le fichier framework2.properties est spécifique à l'environnement cible -->
+		<delete file="${properties.dir}\framework2.properties"/>
+		<copy file="${resources.dir}\framework2.properties" todir="${properties.dir}"/>
+
+		<!-- le fichier hermes2.properties est spécifique à l'environnement cible -->
+		<delete file="${properties.dir}\hermes2.properties"/>
+		<copy file="${resources.dir}\hermes2.properties" todir="${properties.dir}"/>
+		
+		<!-- les fichiers <societe>.xml sont spécifiques à l'environnement cible -->
+		<foreach list="${societes}" target="majFichierParametrageXML" delimiter="," param="societe" inheritall="true"/>
+
+		<echo file="${log.file}" append="true">
+		OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les properties n'ont pas été copiés
+		</echo>
+	</else>
+	</if>
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 4 : génération du JAR des Injecteurs
+	*********************************************************************
+	-->
+	<target name="makeJar" depends="properties">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 4 :	Création du JAR des Injecteurs.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeJar.log" action="start" />
+
+	<trycatch>
+			<try>
+			<mkdir dir="${exported.dir}"/>
+		</try>
+
+		<catch>
+			<delete	dir="${exported.dir}/jar"/>
+			<delete	dir="${exported.dir}/zip"/>
+			<delete>
+					<fileset dir="${exported.dir}/*.zip"/>
+			</delete>
+		</catch>
+	</trycatch>
+
+	<if>
+ 		<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete	dir="${exported.dir}/jar"/>
+		<mkdir	dir="${exported.dir}/jar"/>
+		<manifest file="${resources.dir}\MANIFEST.MF">
+			<attribute name="Created-By" value="Java ${jdk.version}" />
+			<attribute name="Built-By" value="${user.name}"/>
+		 	<attribute name="Built-Date" value="${TODAY_UK}"/>
+			<section name="com/hermes/ref/acteur/businessobject/">
+				<attribute name="Specification-Title" value="Hermes" />
+				<attribute name="Specification-Version" value="${cvs.tag}" />
+				<attribute name="Specification-Vendor" value="CGI France - UEM" />
+				<attribute name="Implementation-Title" value="Hermes" />
+				<attribute name="Implementation-Version" value="${cvs.tag}.${build.number}" />
+				<attribute name="Implementation-Vendor" value="CGI France - UEM" />
+	 		</section>
+		</manifest>
+		<jar jarfile="${exported.dir}/jar/${app_jar}" basedir="${build.dir}" manifest="${resources.dir}\MANIFEST.MF">
+			<!-- On ne met pas tous les fichiers properties dans le Jar des batchs car on ne peut
+			pas facilement les modifier... -->
+			<fileset dir="${properties.dir}" excludes="${properties.dir}/framework.properties **/framework2.properties **/hermes.properties **/hermes2.properties **/*.xml"/>
+		</jar>
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier JAR n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	<record name="${log.dir}/makeJar.log" action="stop" />
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 5 : génération du Zip des Injecteurs
+	*********************************************************************
+	-->
+	<target name="makeZip" depends="makeJar">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 5 :	Création du Zip des Injecteurs.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeZip.log" action="start" />
+	<delete	dir="${exported.dir}/zip"/>
+	<mkdir	dir="${exported.dir}/zip"/>
+	<if>
+ 		<equals arg1="${etape5}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete file="${app_zip}"/>
+		<copy todir="${exported.dir}/zip/injecteurs/classes" >
+			<fileset dir="${properties.dir}" includes="${properties.dir}/framework.properties **/framework2.properties **/hermes.properties **/hermes2.properties **/*.xml"/>
+		</copy>
+
+		<copy todir="${exported.dir}/zip/injecteurs/lib" flatten="true">
+			<fileset dir="${exported.dir}" includes="jar/${app_jar}"/>
+			<fileset dir="${ldap.home}" includes="**/*.jar"/>
+			<fileset dir="${oracle.home}" includes="**/*.jar"/>
+			<fileset dir="${librairies.jar.inj.temp}" includes="*.jar"/>
+			<fileset dir="${hermesArchi.home}" includes="${HermesArchiJar}"/>
+			<fileset dir="${framework.home}" includes="${FrameworkJar}, ${FrameworkEnterpriseJar}"/>
+			<fileset dir="${efluidEDK.home}" includes="${efluidEDKJar}"/>
+		</copy>
+
+		<copy todir="${exported.dir}/zip/injecteurs/scripts" flatten="true" >
+			<fileset dir="${source.dir}" includes="**/setEnvBatch.cmd,**/setEnvBatchINJECTEUR.cmd,**/Injecteur*.cmd,**/cac_batchDeterminationPortefeuille.cmd,**/cac_setEnvBatchComptabilite.cmd,**/act_batchGenererActeurDoublon.cmd,**/act_batchFusionnerActeurDoublon.cmd,**/act_setEnvBatchActeur.cmd,**/adr_batchGenererAdressePostaleReconstituee.cmd,**/adr_setEnvBatchAdresse.cmd"/>
+		</copy>
+
+		<copy todir="${exported.dir}/zip/injecteurs/scripts" flatten="true" >
+			<fileset dir="${script.batch.dir}" includes="**/*.cmd"/>
+		</copy>
+
+		<copy todir="${exported.dir}/zip/injecteurs/files" >
+			<fileset dir="${script.batch.dir}/files" includes="**/dir"/>
+		</copy>
+
+		<zip destfile="${app_zip}" basedir="${exported.dir}/zip"/>
+		
+		<!-- nettoyage des sous-répertoires -->
+		<delete dir="${exported.dir}/jar"/>
+		<delete dir="${exported.dir}/zip"/>
+
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier Zip n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	<record name="${log.dir}/makeZip.log" action="stop" />
+	</target>
+
+	<!--
+	*********************************************************************
+	Déploiement du Zip
+	********************************************************************
+	-->
+	<target name="deployZip" depends="makeZip">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			Déploiement du Zip
+		*********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${deploy}" arg2="${oui}"/>
+	<then>
+		<copy file="${app_zip}" todir="${deploy.home}"/>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			Le fichier Zip n'a pas été déployé
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<target name="make">
+		<antcall target="deployZip"/>
+	</target>
+
+</project>

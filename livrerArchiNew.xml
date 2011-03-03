@@ -1,0 +1,1993 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="livrerArchi" default="make" basedir="..">
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+   *********************************************************************
+    Ce sript permet de livrer l'architecture dans différents environnements fonctionnel
+    La version à livrer est taggé.
+    Le fonctionnel cible se trouve dans une branche donnée ou dans le tronc.
+
+    Etapes du scripts :
+      Initialisations
+      1. checkout CVS (archi + fonctionnel)
+      2. compilation de l'archi + jar
+      3. copie des fichiers de l'archi sous le fonctionnel
+      4. commit des fichiers modifiés
+      5. import des nouveaux fichiers
+
+ !!!!! Ce script ne gère pas la suppression : A FAIRE A LA MAIN
+
+    Ce script attend en paramètre :
+
+   OBLIGATOIRES
+     cvs.tag				: nom du tag de l'archi
+     cvs.branche		: nom de la branche du fonctionnel où on livre, TRONC si c'est le tronc.
+
+   FACULTATIFS
+
+     cvs.login			: nom du user pour la connexion à CVS. Par défaut ce paramètre vaut adminARCHI
+     cvs.server 		: nom du serveur sur lequel se trouve la base CVS. Par défaut hermescvs
+     cvs.repo			: nom du repository CVS. Par défaut DEV
+   Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+     etape 				: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+
+   Compilation multi JDK (1.4 et 1.5) :
+     pour compiler en JDK 1.4 et 1.5 :
+     - lancer le script avec le JDK 1.4
+     - spécifier la localisation du JDK 1.5 en utilisant la propriété jdk1.5.home
+
+   Avant de lancer le script fixer les paramètres d'environnement.
+
+   JAVA_HOME
+   ANT_HOME
+   CVS_HOME
+   set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVS_HOME%
+
+   La chaîne de lancement est par exemple :
+
+   ant -f livrerArchi.xml -Dcvs.tag=V3_0_1 -Dcvs.branche=HERMES_3_0
+     [ -Dcvs.login=mrabti_s -Dcvs.serveur=lausanne -Dcvs.repo=DEV -Detape=2 ]
+
+   Chaque environnement fonctionnel cible doit posséder à sa racine un fichier livraisonArchi.properties définissant certaines
+    propriétés utilisées lors de la livraison :
+    Les répertoires à livrer :
+      libDir : pointe vers le répertoire des jar (lib)
+      lib1.5Dir : pointe vers le répertoire des jar spécifique JDK 1.5(lib)
+      webDir : pointe vers le répertoire de la partie web (tomcat/hermes ou web)
+      map4jDir : pointe vers le répertoire map4j
+      sqlDir : pointe vers le répertoire sql
+      mappingDir : pointe vers le répertoire des mappings
+    Si une propriété n'est pas renseigné, on ne livre pas les éléments en question
+
+    Autres propriétés
+      webDir.jsp.excludes : liste des fichiers du répertoire jsp à exclure de la livraison
+      webDir.webinf.excludes : liste des fichiers du répertoire WEB-INF à exclure de la livraison
+      map4jDir.excludes : listes des fichiers de Map4j à exclure de la livraison
+      sqlDir.excludes : listes des fichiers SQL à exclure de la livraison
+      importer.nouveaux : doit valoir true si l'on veut importer les nouveaux fichiers dans l'environnement.
+      importer.nouveaux.jsp : doit valoir true si l'on veut importer les nouveaux fichiers JSP dans l'environnement.
+      importer.nouveaux.map4j : doit valoir true si l'on veut importer les nouveaux squelette Map4J archi dans l'environnement.
+      importer.nouveaux.sql : doit valoir true si l'on veut importer les nouveaux scripts sql archi dans l'environnement.
+
+   *********************************************************************
+   -->
+
+  <property name="root" value="${basedir}"/>
+  <property name="livraison.dir" value="${root}/livraison"/>
+  <property name="ressources.dir" value="${root}/ressources"/>
+  <property name="build.dir" value="${root}/tmp/classes"/>
+  <property name="buildDebug.dir" value="${root}/tmp/classesDebug"/>
+  <property name="javaDoc.dir" value="${root}/javadoc"/>
+
+  <!-- propriétés pour le déroulement des étapes du script -->
+  <property name="etapeAutorisee" value="autorisee"/>
+  <property name="etapeNonAutorisee" value="nonAutorisee"/>
+  <property name="oui" value="Y"/>
+
+  <!--
+   *********************************************************************
+     librairies nécessaires pour la compilation.
+     Le lecteur I doit être mappé sur Zurich\Java à Paris
+   *********************************************************************
+   -->
+  <property name="lib.dir" value="${root}/scripts/lib"/>
+  <property name="ldap.home" value="I:/ldap"/>
+  <property name="oracle.home" value="I:/Oracle"/>
+  <property name="weblo.home" value="I:/weblogic/WL81SP5"/>
+  <!--
+   <property name="servlet.home" value="D:/Programs/tomcat/jakarta-tomcat-4.0.4/common/lib" />
+   -->
+
+
+  <property name="tmp.dir" value="${root}/tmp"/>
+
+
+  <!-- les parametres CVS -->
+  <property name="cvs.tronc" value="TRONC"/>
+  <property name="cvs.dir" value="${tmp.dir}/checkout"/>
+
+  <property name="cvs.module.source" value="HermesArchi"/>
+
+  <property name="cvs.source.dir" value="${cvs.dir}/${cvs.module.source}"/>
+  <property name="jar.dir" value="${cvs.source.dir}/lib"/>
+  <property name="jar1.5.dir" value="${cvs.source.dir}/lib"/>
+  <property name="source.dir" value="${cvs.source.dir}/src"/>
+  <property name="properties.dir" value="${cvs.source.dir}/properties"/>
+  <property name="map4j.dir" value="${cvs.source.dir}/map4j"/>
+  <property name="web.dir" value="${cvs.source.dir}/tomcat/hermes"/>
+  <property name="sql.dir" value="${cvs.source.dir}/sql"/>
+  <property name="tlds.dir" value="${web.dir}/WEB-INF/tlds"/>
+  <property name="importNouveaux.dir" value="${cvs.dir}/importNouveaux"/>
+
+  <!-- les jar -->
+  <property name="manifest.classpath" value="framework.jar frameworkEnterprise.jar poi-2.5.1-final-20040804.jar"/>
+  <property name="manifest.classpath.debug"
+            value="frameworkDebug.jar frameworkEnterpriseDebug.jar poi-2.5.1-final-20040804.jar"/>
+  <property name="archi_jar" value="${livraison.dir}/HermesArchi.jar"/>
+  <property name="archiDebug_jar" value="${livraison.dir}/HermesArchiDebug.jar"/>
+  <property name="archiSrc_jar" value="${livraison.dir}/HermesArchiSrc.jar"/>
+  <property name="archiDoc_jar" value="${livraison.dir}/HermesArchiDoc.jar"/>
+
+  <property name="archi.jar.exclude" value="**/ECodeEdition*.*,**/EClasse*.*,**/EUniteCritere*.*"/>
+
+  <property name="env.properties" value="livraisonArchi.properties"/>
+
+  <!--
+	*********************************************************************
+  	le classPath framework
+	*********************************************************************
+	-->
+  <path id="framework.jar.path">
+    <fileset dir="${jar.dir}">
+      <include name="framework*.jar"/>
+    </fileset>
+  </path>
+
+
+  <!--
+   *********************************************************************
+     le classPath pour la compilation
+   *********************************************************************
+   -->
+  <path id="project.class.path">
+    <fileset dir="${jar.dir}">
+      <include name="*.jar"/>
+      <exclude name="*Debug.jar"/>
+      <exclude name="Map4J.jar"/>
+      <exclude name="openTool.jar"/>
+    </fileset>
+    <fileset dir="${oracle.home}">
+      <include name="*.jar"/>
+    </fileset>
+    <fileset dir="${weblo.home}">
+      <include name="*.jar"/>
+    </fileset>
+  </path>
+  
+  <path id="project.class.path.1.5">
+    <fileset dir="${jar1.5.dir}">
+      <include name="**/*.jar"/>
+      <exclude name="**/*Debug.jar"/>
+    </fileset>
+    <path refid="project.class.path"/>
+  </path>
+
+  <!-- la cible d'initialisation -->
+  <target name="init">
+
+    <fail message="la propriété cvs.tag est obligatoire.">
+      <condition>
+        <not>
+          <isset property="cvs.tag"/>
+        </not>
+      </condition>
+    </fail>
+    <property name="tag.dir" value="${tmp.dir}/${cvs.tag}"/>
+
+    <buildnumber file="${root}/build.number"/>
+    <tstamp>
+      <format property="TODAY_UK" pattern="dd/MM/yyyy hh:mm:ss" locale="en"/>
+    </tstamp>
+
+    <property name="log.dir" value="${tag.dir}/${build.number} - livrer ${cvs.tag}"/>
+    <property name="log.file" value="${log.dir}/livrerArchi.log"/>
+    <mkdir dir="${log.dir}"/>
+
+    <!--
+    on détermine s'il faut compiler en JDK 1.5
+    - soit la JVM utilisée pour lancer ant est une JVM 1.5
+    - soit on a spécifier le chemin du jdk 1.5
+    -->
+    <condition property="isCompilJDK1.5">
+      <or>
+        <equals arg1="${ant.java.version}" arg2="1.5"/>
+        <and>
+          <isset property="jdk1.5.home"/>
+          <available file="${jdk1.5.home}/bin/javac.exe"/>
+        </and>
+      </or>
+    </condition>
+
+    <!--
+    on détermine s'il faut compiler en JDK 1.4
+    -->
+    <condition property="isCompilJDK1.4">
+      <equals arg1="${ant.java.version}" arg2="1.4"/>
+    </condition>
+
+    <!--
+    Répertoires spécifiques pour le JDK 1.5.
+    Si l'on compile pour les deux version : répertoire de build et de livraison spécifique 1.5
+    Sinon, on utilise les répertoires standards
+    -->
+
+    <condition property="livraison15.dir" value="${livraison.dir}1.5" else="${livraison.dir}">
+      <isset property="isCompilJDK1.4"/>
+    </condition>
+
+    <condition property="jar.jdk1.5.specific">
+      <and>
+        <isset property="isCompilJDK1.4"/>
+        <isset property="isCompilJDK1.5"/>
+      </and>
+    </condition>
+
+    <!-- répertoire spécifique 1.5 en cas de double compilation -->
+    <property name="build15.dir" value="${build.dir}15"/>
+    <property name="buildDebug15.dir" value="${buildDebug.dir}15"/>
+    <property name="archi15_jar" value="${livraison15.dir}/HermesArchi.jar"/>
+    <property name="archiDebug15_jar" value="${livraison15.dir}/HermesArchiDebug.jar"/>
+
+    <!--
+    <if>
+      <isset property="jdk1.5.home"/>
+      <then>
+        <exec command="${jdk1.5.home}/bin/java.exe -version" outputproperty="jdk1.5.version"/>
+      </then>
+    </if>
+    -->
+    <property name="jdk1.5.version" value="1.5"/>
+
+
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      Lancement du script de livraison de la couche Architecture de Hermes
+      *********************************************************************
+    </echo>
+
+    <!-- connexion à CVS -->
+    <if>
+      <equals arg1="${cvs.login}" arg2="$${cvs.login}"/>
+      <then>
+        <property name="cvs.login" value="adminARCHI"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.server}" arg2="$${cvs.server}"/>
+      <then>
+        <property name="cvs.server" value="hermescvs"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.repo}" arg2="$${cvs.repo}"/>
+      <then>
+        <property name="cvs.repo" value="/DEV"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.nocommit}" arg2="$${cvs.nocommit}"/>
+      <then>
+        <property name="cvs.nocommit" value="false"/>
+      </then>
+    </if>
+    <property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+    <switch value="${etape}">
+      <case value="2">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 2 : Compilation des sources java de ${source.dir} vers ${build.dir}"/>
+      </case>
+      <case value="3">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr"
+                  value="ETAPE 3 : Compilation Debug des sources java de ${source.dir} vers ${buildDebug.dir}"/>
+      </case>
+      <case value="4">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 4 : Génération de la javaDoc vers ${javaDoc.dir}"/>
+      </case>
+      <case value="5">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 5 : Création du jar de l'archi"/>
+      </case>
+      <case value="6">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 6 : Création du jar debug de l'archi"/>
+      </case>
+      <case value="7">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 7 : Création du jar des sources de l'archi"/>
+      </case>
+      <case value="8">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etape7" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 8 : Création du jar de la javadoc de l'archi"/>
+      </case>
+      <case value="9">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etape7" value="${etapeNonAutorisee}"/>
+        <property name="etape8" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 9 : livraison des jars de l'archi dans les environnements"/>
+      </case>
+      <case value="10">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etape7" value="${etapeNonAutorisee}"/>
+        <property name="etape8" value="${etapeNonAutorisee}"/>
+        <property name="etape9" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 10 : livraison des sources web de l'archi dans les environnements"/>
+      </case>
+      <case value="11">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etape7" value="${etapeNonAutorisee}"/>
+        <property name="etape8" value="${etapeNonAutorisee}"/>
+        <property name="etape9" value="${etapeNonAutorisee}"/>
+        <property name="etape10" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 11 : Commit des modifications des environnements"/>
+      </case>
+      <case value="12">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etape6" value="${etapeNonAutorisee}"/>
+        <property name="etape7" value="${etapeNonAutorisee}"/>
+        <property name="etape8" value="${etapeNonAutorisee}"/>
+        <property name="etape9" value="${etapeNonAutorisee}"/>
+        <property name="etape10" value="${etapeNonAutorisee}"/>
+        <property name="etape11" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 12 : Import des nouveaux fichiers dans les environnements"/>
+      </case>
+      <default>
+        <echo file="${log.file}" append="true">
+          => Cas par défaut. Toutes les étapes du script seront exécutées
+        </echo>
+      </default>
+    </switch>
+    <!--
+        les property qui n'auraient pas été valuées précédemment le sont à présent.
+        La valeur mise fait en sorte que l'étape est autorisée.
+      -->
+    <property name="etapeDescr" value="ETAPE 1 : Checkout de ${cvs.module.source}"/>
+    <property name="etape1" value="${etapeAutorisee}"/>
+    <property name="etape2" value="${etapeAutorisee}"/>
+    <property name="etape3" value="${etapeAutorisee}"/>
+    <property name="etape4" value="${etapeAutorisee}"/>
+    <property name="etape5" value="${etapeAutorisee}"/>
+    <property name="etape6" value="${etapeAutorisee}"/>
+    <property name="etape7" value="${etapeAutorisee}"/>
+    <property name="etape8" value="${etapeAutorisee}"/>
+    <property name="etape9" value="${etapeAutorisee}"/>
+    <property name="etape10" value="${etapeAutorisee}"/>
+    <property name="etape11" value="${etapeAutorisee}"/>
+    <property name="etape12" value="${etapeAutorisee}"/>
+
+    <input message="livrer la javaDoc? (Y/N)" addproperty="livrer.javadoc.ok" defaultvalue="N"/>
+    <record name="${log.file}" action="start" append="yes"/>
+    <echo>
+      cvs.root         : ${cvs.root}
+      cvs.branche      : ${cvs.branche}
+      Module           : ${cvs.module.source}
+      cvs.tag          : ${cvs.tag}
+      livrer javaDoc   : ${livrer.javadoc.ok}
+      debut            : ${etapeDescr}
+      java version     : ${ant.java.version}
+      compil 1.4       : ${isCompilJDK1.4}
+      compil 1.5       : ${isCompilJDK1.5} ${jdk1.5.version}
+      JAR 1.5 specific : ${jar.jdk1.5.specific}
+    </echo>
+    <if>
+      <equals arg1="${cvs.nocommit}" arg2="true"/>
+      <then>
+        <echo message="pas de commit cvs"/>
+      </then>
+      <else>
+        <echo message="commit cvs active"/>
+      </else>
+    </if>
+    <input message="OK pour livraison? (Y/N)"
+           addproperty="livraison.ok"/>
+    <fail message="livraison annulee">
+      <condition>
+        <equals arg1="${livraison.ok}" arg2="N" casesensitive="false"/>
+      </condition>
+    </fail>
+    <record name="${log.file}" action="stop"/>
+
+
+  </target>
+
+
+  <!--
+   *********************************************************************
+   Récupération d'une copie locale des deux modules archi + fonctionnel
+
+   On récupère uniquement les sources taggés de l'archi
+   On récupère uniquement la partie à mettre à jour (ie. provenant de l'archi)
+   dans le fonctionnel pour la branche donnée (ou tronc)
+   *********************************************************************
+   -->
+  <!--
+   *********************************************************************
+   ETAPE 1 : checkout CVS
+   *********************************************************************
+   -->
+  <target name="getFromCVS">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 1 : Checkout de ${cvs.module.source}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape1}" arg2="${etapeAutorisee}"/>
+      <then>
+
+        <delete dir="${cvs.dir}"/>
+        <mkdir dir="${cvs.dir}"/>
+        <mkdir dir="${importNouveaux.dir}"/>
+
+        <!-- ARCHI -->
+        <cvs cvsRoot="${cvs.root}" package="${cvs.module.source}" dest="${cvs.dir}"
+             command="checkout -P -r ${cvs.tag}"/>
+
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          le checkout n'a pas été demandé
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="compilation" depends="getFromCVS">
+    <pathconvert property="project.class.path.str" refid="project.class.path"/>
+    <pathconvert property="project.class.path.1.5.str" refid="project.class.path.1.5"/>
+
+    <antcall target="compil">
+      <param name="build.dest.dir" value="${build.dir}"/>
+    </antcall>
+    <antcall target="compil1.5">
+      <param name="build.dest.dir" value="${build15.dir}"/>
+    </antcall>
+    <antcall target="compilDebug">
+      <param name="build.dest.dir" value="${buildDebug.dir}"/>
+    </antcall>
+    <antcall target="compilDebug1.5">
+      <param name="build.dest.dir" value="${buildDebug15.dir}"/>
+    </antcall>
+  </target>
+
+  <!--
+   *********************************************************************
+   Compilation des sources java de ${source.dir} vers ${build.dir}
+   *********************************************************************
+   -->
+  <target name="compil">
+    <!-- compilation standard utilisant le compilateur de la JVM ayant lancé le script -->
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 2 : Compilation des sources java de ${source.dir} vers ${build.dest.dir}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape2}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${build.dest.dir}"/>
+        <mkdir dir="${build.dest.dir}"/>
+        <record name="${log.dir}/compil.log" action="start"/>
+        <echo>
+          classpath  : ${project.class.path.str}
+        </echo>
+        <javac srcdir="${source.dir}" destdir="${build.dest.dir}" >
+          <classpath refid="project.class.path"/>
+        </javac>
+        <record name="${log.dir}/compil.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la compilation n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- Pour le jar debug -->
+  <target name="compilDebug">
+    <!-- compilation standard utilisant le compilateur de la JVM ayant lancé le script -->
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 3 : Compilation Debug des sources java de ${source.dir} vers ${build.dest.dir}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape3}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${build.dest.dir}"/>
+        <mkdir dir="${build.dest.dir}"/>
+        <record name="${log.dir}/compilDebug.log" action="start"/>
+        <echo>
+          classpath  : ${project.class.path.str}
+        </echo>
+        <javac srcdir="${source.dir}" destdir="${build.dest.dir}" debug="on">
+          <classpath refid="project.class.path"/>
+        </javac>
+        <record name="${log.dir}/compilDebug.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la compilation debug n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="compil1.5" if="jar.jdk1.5.specific">
+    <!-- compilation spécifique JDK 1.5 utilisant un compilateur particulier -->
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 2b : Compilation des sources java en JDK 1.5 de ${source.dir} vers ${build.dest.dir}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape2}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${build.dest.dir}"/>
+        <mkdir dir="${build.dest.dir}"/>
+        <record name="${log.dir}/compil1.5.log" action="start"/>
+        <echo>
+          compilateur : ${jdk1.5.home}/bin/javac
+          classpath   : ${project.class.path.1.5.str}
+        </echo>
+        <if>
+          <equals arg1="${ant.java.version}" arg2="1.5"/>
+          <then>
+            <!-- à priori on est jamais dans ce cas là -->
+            <javac srcdir="${source.dir}"
+                   destdir="${build.dest.dir}">
+              <classpath refid="project.class.path.1.5"/>
+            </javac>
+          </then>
+          <else>
+            <javac srcdir="${source.dir}"
+                   destdir="${build.dest.dir}"
+                   fork="yes"
+                   executable="${jdk1.5.home}/bin/javac" compiler="javac1.5">
+              <classpath refid="project.class.path.1.5"/>
+            </javac>
+          </else>
+        </if>
+        <record name="${log.dir}/compil1.5.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la compilation n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- Pour le jar debug -->
+  <target name="compilDebug1.5" if="jar.jdk1.5.specific">
+    <!-- compilation spécifique JDK 1.5 utilisant un compilateur particulier -->
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 3b : Compilation Debug en JDK 1.5 des sources java de ${source.dir} vers ${build.dest.dir}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape3}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${build.dest.dir}"/>
+        <mkdir dir="${build.dest.dir}"/>
+        <record name="${log.dir}/compilDebug1.5.log" action="start"/>
+        <echo>
+          compilateur : ${jdk1.5.home}/bin/javac
+          classpath   : ${project.class.path.1.5.str}
+        </echo>
+        <if>
+          <equals arg1="${ant.java.version}" arg2="1.5"/>
+          <then>
+            <!-- à priori on est jamais dans ce cas là -->
+            <javac srcdir="${source.dir}"
+                   destdir="${build.dest.dir}"
+                   debug="on">
+              <classpath refid="project.class.path.1.5"/>
+            </javac>
+          </then>
+          <else>
+            <javac srcdir="${source.dir}"
+                   destdir="${build.dest.dir}"
+                   debug="on"
+                   fork="yes"
+                   executable="${jdk1.5.home}/bin/javac" compiler="javac1.5">
+              <classpath refid="project.class.path.1.5"/>
+            </javac>
+          </else>
+        </if>
+        <record name="${log.dir}/compilDebug1.5.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la compilation debug n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+
+  <!--
+     *********************************************************************
+     Génération de la javaDoc vers ${javaDoc.dir}
+      *********************************************************************
+   -->
+  <target name="javadoc" depends="compilation">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 4 : Génération de la javaDoc vers ${javaDoc.dir}
+      *********************************************************************
+    </echo>
+    <if>
+      <and>
+        <equals arg1="${etape4}" arg2="${etapeAutorisee}"/>
+        <equals arg1="${livrer.javadoc.ok}" arg2="Y"/>
+      </and>
+      <then>
+        <record name="${log.dir}/javadoc.log" action="start"/>
+        <delete dir="${javaDoc.dir}"/>
+        <mkdir dir="${javaDoc.dir}"/>
+        <javadoc packagenames="com.hermes.arc.*"
+                 sourcepath="${source.dir}"
+                 destdir="${javaDoc.dir}"
+                 author="true"
+                 version="true"
+                 use="true"
+                 windowtitle="Efluid Architecture API"
+				 maxmemory="256M">
+          <doctitle><![CDATA[<h1>Hermes Architecture</h1>]]></doctitle>
+          <bottom><![CDATA[<i>Copyright &#169; UEM. All Rights Reserved.</i>]]></bottom>
+        </javadoc>
+        <record name="${log.dir}/javadoc.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la compilation de la javadoc n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!--
+   *********************************************************************
+   Création du jar de l'archi
+     - un jar pour les classes (compilées) + les properties (sauf le
+       framework.properties du répertoire racine.
+     - un jar pour les classes (compilées en debug)
+     - un jar pour les classes sources (fichiers java)
+     - un jar pour la javaDoc
+    *********************************************************************
+   -->	
+  <target name="makeJars" depends="javadoc">
+    <antcall target="makeJar"/>
+    <antcall target="makeJar1.5"/>
+    <antcall target="makeJarDebug"/>
+    <antcall target="makeJarDebug1.5"/>
+    <antcall target="makeDocJar"/>
+    <antcall target="makeSrcJar"/>
+  </target>
+
+  
+  <target name="makeJar">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 5 : Création du jar de l'archi
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape5}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${livraison.dir}"/>
+        <mkdir dir="${livraison.dir}"/>
+        <record name="${log.dir}/makeJar.log" action="start"/>
+        <!-- Création du manifest du JAR + copie des properties-->
+        <copy todir="${build.dir}">
+          <fileset dir="${source.dir}">
+            <exclude name="**/*.java"/>
+            <exclude name="pom.xml"/>
+          </fileset>
+        </copy>
+        <copy todir="${build.dir}">
+          <fileset dir="${properties.dir}">
+            <exclude name="framework.properties"/>
+          </fileset>
+        </copy>
+        <delete file="${ressources.dir}\MANIFEST.MF"/>
+        <manifest file="${ressources.dir}\MANIFEST.MF">
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <attribute name="Class-Path" value='${manifest.classpath}'/>
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <!--
+          Recopie l'intégralité du projet d'intégration de l'archi de ${build} dans le fichier HermesArchi.jar
+          -->
+        <jar jarfile="${archi_jar}" basedir="${build.dir}"
+             manifest="${ressources.dir}\MANIFEST.MF"
+             excludes="${archi.jar.exclude}"/>
+        <record name="${log.dir}/makeJar.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="makeJar1.5" if="jar.jdk1.5.specific">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 5b : Création du jar de l'archi 1.5
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape5}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${livraison15.dir}"/>
+        <mkdir dir="${livraison15.dir}"/>
+        <record name="${log.dir}/makeJar1.5.log" action="start"/>
+        <!-- Création du manifest du JAR + copie des properties-->
+        <copy todir="${build15.dir}">
+          <fileset dir="${source.dir}">
+            <exclude name="**/*.java"/>
+            <exclude name="pom.xml"/>
+          </fileset>
+        </copy>
+        <copy todir="${build15.dir}">
+          <fileset dir="${properties.dir}">
+            <exclude name="framework.properties"/>
+          </fileset>
+        </copy>
+        <delete file="${ressources.dir}\MANIFEST1.5.MF"/>
+        <manifest file="${ressources.dir}\MANIFEST1.5.MF">
+          <attribute name="Created-By" value="${jdk1.5.version}"/>
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <attribute name="Class-Path" value='${manifest.classpath}'/>
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <!--
+          Recopie l'intégralité du projet d'intégration de l'archi de ${build} dans le fichier HermesArchi.jar
+          -->
+        <jar jarfile="${archi15_jar}" basedir="${build15.dir}"
+             manifest="${ressources.dir}\MANIFEST1.5.MF"
+             excludes="${archi.jar.exclude}"/>
+        <record name="${log.dir}/makeJar1.5.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- Jar debug -->
+  <target name="makeJarDebug">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 6 : Création du jar debug de l'archi
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape6}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir}/makeJarDebug.log" action="start"/>
+        <delete file="${ressources.dir}\MANIFESTDEBUG.MF"/>
+        <!-- Création du manifest du JAR + copie des properties-->
+        <manifest file="${ressources.dir}\MANIFESTDEBUG.MF">
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <attribute name="Class-Path" value='${manifest.classpath.debug}'/>
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi (Debug)"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi (Debug)"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <copy todir="${buildDebug.dir}">
+          <fileset dir="${source.dir}">
+            <exclude name="**/*.java"/>
+            <exclude name="pom.xml"/>
+          </fileset>
+        </copy>
+        <copy todir="${buildDebug.dir}">
+          <fileset dir="${properties.dir}">
+            <exclude name="framework.properties"/>
+          </fileset>
+        </copy>
+        <!--
+          Recopie l'intégralité du projet d'intégration de l'archi de ${buildDebug} dans le fichier HermesArchi.jar
+          -->
+        <jar jarfile="${archiDebug_jar}" basedir="${buildDebug.dir}"
+             manifest="${ressources.dir}\MANIFESTDEBUG.MF"
+             excludes="${archi.jar.exclude}"/>
+        <record name="${log.dir}/makeJarDebug.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar debug n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="makeJarDebug1.5" if="jar.jdk1.5.specific">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 6b : Création du jar debug de l'archi 1.5
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape6}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir}/makeJarDebug1.5.log" action="start"/>
+        <delete file="${ressources.dir}\MANIFESTDEBUG1.5.MF"/>
+        <!-- Création du manifest du JAR + copie des properties-->
+        <manifest file="${ressources.dir}\MANIFESTDEBUG1.5.MF">
+          <attribute name="Created-By" value="${jdk1.5.version}"/>
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <attribute name="Class-Path" value='${manifest.classpath.debug}'/>
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi (Debug)"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi (Debug)"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <copy todir="${buildDebug15.dir}">
+          <fileset dir="${source.dir}">
+            <exclude name="**/*.java"/>
+            <exclude name="pom.xml"/>
+          </fileset>
+        </copy>
+        <copy todir="${buildDebug15.dir}">
+          <fileset dir="${properties.dir}">
+            <exclude name="framework.properties"/>
+          </fileset>
+        </copy>
+        <!--
+          Recopie l'intégralité du projet d'intégration de l'archi de ${buildDebug} dans le fichier HermesArchi.jar
+          -->
+        <jar jarfile="${archiDebug15_jar}" basedir="${buildDebug15.dir}"
+             manifest="${ressources.dir}\MANIFESTDEBUG1.5.MF"
+             excludes="${archi.jar.exclude}"/>
+        <record name="${log.dir}/makeJarDebug1.5.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar debug n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="makeSrcJar">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 7 : Création du jar des sources de l'archi
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape7}" arg2="${etapeAutorisee}"/>
+      <then>
+        <!-- Création du manifest du JAR-->
+        <manifest file="${ressources.dir}\MANIFEST.MF">
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <!--<attribute name="Class-Path" value='./properties'/>-->
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi (Source)"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi (Source)"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <!-- Recopie l'intégralité du sources du projet d'intégration de l'archi dans le fichier HermesArchiSrc.jar -->
+        <jar jarfile="${archiSrc_jar}" basedir="${source.dir}" manifest="${ressources.dir}\MANIFEST.MF"
+             excludes="${archi.jar.exclude}"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar des sources n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="makeDocJar">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 8 : Création du jar de la javadoc de l'archi
+      *********************************************************************
+    </echo>
+    <if>
+      <and>
+        <equals arg1="${etape8}" arg2="${etapeAutorisee}"/>
+        <equals arg1="${livrer.javadoc.ok}" arg2="Y"/>
+      </and>
+      <then>
+        <!-- Création du manifest du JAR-->
+        <manifest file="${ressources.dir}\MANIFEST.MF">
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <!--<attribute name="Class-Path" value='./properties'/>-->
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes archi (Doc)"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France - UEM"/>
+            <attribute name="Implementation-Title" value="Hermes archi (Doc)"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France - UEM"/>
+          </section>
+        </manifest>
+        <!-- Recopie l'intégralité de la javadoc du projet d'intégration de l'archi dans le fichier HermesArchiDoc.jar -->
+        <jar jarfile="${archiDoc_jar}" basedir="${javaDoc.dir}"
+             manifest="${ressources.dir}\MANIFEST.MF"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la création du jar de la javadoc n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- livraison de l'archi dans un environnement donné-->
+  <target name="livraisonEnv">
+    <property name="log.dir.env" value="${log.dir}/${envIndex} - ${envName}"/>
+    <mkdir dir="${log.dir.env}"/>
+
+    <record name="${log.dir.env}/${envName}_livraison.log" action="start"/>
+    <property name="cvs.errfile" value="${log.dir.env}/${envName}_CVSerror.log"/>
+    <property name="cvs.commitModif.errfile" value="${log.dir.env}/${envName}_commitModif_CVSerror.log"/>
+
+    <if>
+      <equals arg1="${cvs.mainModule.dest}" arg2="$${cvs.mainModule.dest}"/>
+      <then>
+        <property name="cvs.mainModule.dest" value="Developpement_dev"/>
+        <property name="cvs.mainModule.dest.backslash" value="Developpement_dev\"/>
+        <property name="cvs.mainModule.dest.slash" value="Developpement_dev/"/>
+      </then>
+      <elseif>
+        <equals arg1="${cvs.mainModule.dest}" arg2=""/>
+        <then>
+          <property name="cvs.mainModule.dest.backslash" value=""/>
+          <property name="cvs.mainModule.dest.slash" value=""/>
+        </then>
+      </elseif>
+      <else>
+        <property name="cvs.mainModule.dest.backslash" value="${cvs.mainModule.dest}\"/>
+        <property name="cvs.mainModule.dest.slash" value="${cvs.mainModule.dest}/"/>
+      </else>
+    </if>
+
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      livraison de l'archi dans l'environnement ${envName}
+      cvsRoot : ${cvs.root}
+      cvsBranche : ${cvs.branche}
+      cvs.mainModule : ${cvs.mainModule.dest}
+    </echo>
+
+    <antcall target="getProprieteLivraison">
+      <param name="envName" value="${envName}"/>
+    </antcall>
+
+    <!-- chargement des proriétés de mise à jour de l'environnement -->
+    <loadproperties srcfile="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${env.properties}"/>
+
+    <!--
+    Si on compile en JDK 1.5, que la propriété lib1.5Dir de l'environnement est renseignée et qu'elle est
+    différente de libDir, on livre les JAR JDK 1.5 dans le répertoire spécifique
+    -->
+    <condition property="isLivrerJAR1.5">
+      <and>
+        <isset property="isCompilJDK1.5"/>
+        <isset property="lib1.5Dir"/>
+        <not>
+          <equals arg1="${libDir}" arg2="${lib1.5Dir}"/>
+        </not>
+      </and>
+    </condition>
+
+    <echo file="${log.file}" append="true">
+    Propriétés de mise à jour de l'environnement ${envName} :
+      libDir   : ${libDir} (lib1.5 : ${lib1.5Dir})
+      webDir   : ${webDir}
+      map4jDir : ${map4jDir}
+      sqlDir   : ${sqlDir}
+      mappingDir : ${mappingDir}
+      fichiers web :
+    	  jsp inclus    : ${webDir.jsp.includes}
+        jsp exclus    : ${webDir.jsp.excludes}
+        webInf exclus : ${webDir.webinf.excludes}
+      fichiers SQL :
+    	  includes : ${sqlDir.includes}
+    	  excludes : ${sqlDir.excludes}
+      fichier mapping
+        mapping inclus : ${mappingDir.includes}
+        mapping exclus : ${mappingDir.excludes}
+      importer nouveaux : ${importer.nouveaux}
+      livrer JAR 1.5    : ${isLivrerJAR1.5} 	
+      *********************************************************************
+    </echo>
+
+    <antcall target="getEnvFromCVS">
+      <param name="envName" value="${envName}"/>
+    </antcall>
+
+    <antcall target="livrerJarInEnv">
+      <param name="envName" value="${envName}"/>
+    </antcall>
+
+    <antcall target="copierFichiersInEnv">
+      <param name="envName" value="${envName}"/>
+    </antcall>
+
+    <if>
+      <not>
+        <equals arg1="${cvs.nocommit}" arg2="true"/>
+      </not>
+      <then>
+        <antcall target="commiterModifsInEnv">
+          <param name="envName" value="${envName}"/>
+        </antcall>
+
+        <if>
+          <equals arg1="${importer.nouveaux}" arg2="true"/>
+          <then>
+            <antcall target="importerNouveaux">
+              <param name="envName" value="${envName}"/>
+            </antcall>
+          </then>
+        </if>
+      </then>
+      <else>
+        <echo>
+          Pas de commit CVS : pas d'appel à commiterModifsInEnv et importerNouveaux          
+        </echo>
+      </else>
+    </if>
+
+    <record name="${log.dir.env}/${envName}_livraison.log" action="stop"/>
+
+  </target>
+
+  <!-- récupération du fichier de paramétrage de la livraison dans un environnement -->
+  <target name="getProprieteLivraison">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      récupération de la description de l'environnement ${envName}
+      *********************************************************************
+    </echo>
+    <!-- FONCTIONNEL -->
+    <if>
+      <equals arg1="${cvs.branche}" arg2="${cvs.tronc}"/>
+      <then>
+        <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${env.properties}"
+             dest="${cvs.dir}"
+             command="checkout"/>
+      </then>
+      <else>
+        <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${env.properties}"
+             dest="${cvs.dir}"
+             command="checkout" tag="${cvs.branche}"/>
+      </else>
+    </if>
+    <echo file="${log.file}" append="true">
+      OK
+    </echo>
+  </target>
+
+  <target name="getEnvFromCVS">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      Récupération de l'environnement ${envName} dans CVS
+      *********************************************************************
+    </echo>
+    <!-- FONCTIONNEL -->
+    <if>
+      <equals arg1="${cvs.branche}" arg2="${cvs.tronc}"/>
+      <then>
+        <if>
+          <not>
+            <equals arg1="${libDir}" arg2="$${libDir}"/>
+          </not>
+          <then>
+            <echo>récupération de ${libDir}</echo>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${libDir}" dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+          <else>
+            <echo>pas de récup de libDir : ${libDir}</echo>
+          </else>
+        </if>
+        <if>
+          <isset property="isLivrerJAR1.5"/>
+          <then>
+            <echo>récupération de ${lib1.5Dir}</echo>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${lib1.5Dir}" dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+          <else>
+            <echo>pas de récup de lib1.5Dir : ${lib1.5Dir}</echo>
+          </else>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${webDir}" arg2="$${webDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${webDir}\jsp\arc"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${webDir}\WEB-INF"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${propertiesDir}" arg2="$${propertiesDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${propertiesDir}"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${map4jDir}" arg2="$${map4jDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${map4jDir}"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${mappingDir}" arg2="$${mappingDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${mappingDir}"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${sqlDir}" arg2="$${sqlDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\data"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\ddl\arc"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\index"
+                 dest="${cvs.dir}"
+                 command="checkout"/>
+          </then>
+        </if>
+      </then>
+      <else>
+
+        <if>
+          <not>
+            <equals arg1="${libDir}" arg2="$${libDir}"/>
+          </not>
+          <then>
+            <echo>récupération de ${libDir}</echo>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${libDir}" dest="${cvs.dir}"
+                 command="checkout"
+                 tag="${cvs.branche}"/>
+          </then>
+          <else>
+            <echo>pas de récup de libDir : ${libDir}</echo>
+          </else>
+        </if>
+        <if>
+          <isset property="isLivrerJAR1.5"/>
+          <then>
+            <echo>récupération de ${lib1.5Dir}</echo>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${lib1.5Dir}" dest="${cvs.dir}"
+                 command="checkout"
+                 tag="${cvs.branche}"/>
+          </then>
+          <else>
+            <echo>pas de récup de lib1.5Dir : ${lib1.5Dir}</echo>
+          </else>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${webDir}" arg2="$${webDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${webDir}\jsp\arc"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${webDir}\WEB-INF"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${propertiesDir}" arg2="$${propertiesDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${propertiesDir}"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${map4jDir}" arg2="$${map4jDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${map4jDir}"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${mappingDir}" arg2="$${mappingDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${mappingDir}"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${sqlDir}" arg2="$${sqlDir}"/>
+          </not>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\data"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\ddl\arc"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.mainModule.dest.backslash}${envName}\${sqlDir}\index"
+                 dest="${cvs.dir}"
+                 command="checkout" tag="${cvs.branche}"/>
+          </then>
+        </if>
+
+
+      </else>
+    </if>
+    <echo file="${log.file}" append="true">
+      OK
+    </echo>
+  </target>
+
+  <!--
+	*********************************************************************
+  Livraison des jar de l'archi dans le module CVS fonctionnel spécifié par envName
+  Le commentaire de l'archivage est le nom du label (tag) de l'archi
+  *********************************************************************
+	-->
+  <target name="livrerJarInEnv">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 9 : livraison des jars de l'archi dans l'environnement ${envName}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape9}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir.env}/${envName}_livrerJar.log" action="start"/>
+
+        <if>
+          <not>
+            <equals arg1="${libDir}" arg2="$${libDir}"/>
+          </not>
+          <then>
+            <if>
+              <equals arg1="${livrer.javadoc.ok}" arg2="Y"/>
+              <then>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${libDir}">
+                  <fileset dir="${livraison.dir}"/>
+                  <fileset dir="${jar.dir}">
+                    <include name="framework*.jar"/>
+                  </fileset>
+                </copy>
+              </then>
+              <else>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${libDir}">
+                  <fileset dir="${livraison.dir}" excludes="*Doc.jar"/>
+                  <fileset dir="${jar.dir}">
+                    <include name="framework*.jar"/>
+                  </fileset>
+                </copy>
+              </else>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${cvs.nocommit}" arg2="true"/>
+              </not>
+              <then>
+                <cvs dest="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${libDir}"
+                     command="commit -m '${cvs.tag}'"/>
+              </then>
+              <else>
+                <echo>
+ cvs dest="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${libDir}" command="commit -m '${cvs.tag}'"
+                </echo>
+              </else>
+            </if>
+          </then>
+        </if>
+        <if>
+          <isset property="isLivrerJAR1.5"/>
+          <then>
+            <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${lib1.5Dir}">
+              <fileset dir="${livraison15.dir}"/>
+              <fileset dir="${jar1.5.dir}">
+                <include name="framework*.jar"/>
+              </fileset>
+            </copy>
+            <if>
+              <not>
+                <equals arg1="${cvs.nocommit}" arg2="true"/>
+              </not>
+              <then>
+                <cvs dest="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${lib1.5Dir}"
+                     command="commit -m '${cvs.tag}'"/>
+              </then>
+              <else>
+                <echo>
+ cvs dest="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${lib1.5Dir}" command="commit -m '${cvs.tag}'"
+                </echo>
+              </else>
+            </if>
+          </then>
+          <else>
+            <echo>
+              Pas de livraison spécifique des JARs 1.5 (lib1.5Dir : ${lib1.5Dir})
+            </echo>
+          </else>
+        </if>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+        <record name="${log.dir.env}/${envName}_livrerJar.log" action="stop"/>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la livraison des jars n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!--
+	*********************************************************************
+  Livraison des sources Web, properties, tlds
+  Attention n'est pas fait pour l'instant :
+  	- la suppression de fichiers
+
+  Il faut copier deux fois les fichiers :
+  	une première fois pour la mise à jour des fichiers existants
+  	une deuxième fois pour l'import de nouveaux fichiers.
+  *********************************************************************
+	-->
+  <target name="copierFichiersInEnv">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 10 : livraison des sources web de l'archi dans l'environnement ${envName}
+      *********************************************************************
+    </echo>
+    <mkdir dir="${importNouveaux.dir}/${envName}"/>
+    <if>
+      <equals arg1="${etape10}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir.env}/${envName}_copierFichiers.log" action="start"/>
+
+        <if>
+          <not>
+            <equals arg1="${webDir}" arg2="$${webDir}"/>
+          </not>
+          <then>
+            <if>
+              <equals arg1="${webDir.jsp.includes}" arg2="$${webDir.jsp.includes}"/>
+              <then>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${webDir}/jsp/arc">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/jsp/arc"
+                           excludes="${webDir.jsp.excludes}"/>
+                </copy>
+              </then>
+              <else>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${webDir}/jsp/arc">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/jsp/arc"
+                           includes="${webDir.jsp.includes}"
+                           excludes="${webDir.jsp.excludes}"/>
+                </copy>
+              </else>
+            </if>
+            <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${webDir}/WEB-INF">
+              <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/WEB-INF"
+                       excludes="${webDir.webinf.excludes}"/>
+            </copy>
+            <if>
+              <or>
+                <equals arg1="${importer.nouveaux}" arg2="true"/>
+                <equals arg1="${importer.nouveaux.jsp}" arg2="true"/>
+              </or>
+              <then>
+
+
+                <if>
+                  <equals arg1="${webDir.jsp.includes}" arg2="$${webDir.jsp.includes}"/>
+                  <then>
+                    <copy todir="${importNouveaux.dir}/${envName}/${webDir}/jsp/arc">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/jsp/arc"
+                               excludes="${webDir.jsp.excludes}"/>
+                    </copy>
+                  </then>
+                  <else>
+                    <copy todir="${importNouveaux.dir}/${envName}/${webDir}/jsp/arc">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/jsp/arc"
+                               includes="${webDir.jsp.includes}"
+                               excludes="${webDir.jsp.excludes}"/>
+                    </copy>
+                  </else>
+                </if>
+
+                <copy todir="${importNouveaux.dir}/${envName}/${webDir}/WEB-INF">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/WEB-INF"
+                           excludes="${webDir.webinf.excludes}"/>
+                </copy>
+              </then>
+            </if>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${map4jDir}" arg2="$${map4jDir}"/>
+          </not>
+          <then>
+            <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${map4jDir}">
+              <fileset dir="${cvs.dir}/${cvs.module.source}/map4j" excludes="${map4jDir.excludes}"/>
+            </copy>
+            <if>
+              <or>
+                <equals arg1="${importer.nouveaux}" arg2="true"/>
+                <equals arg1="${importer.nouveaux.map4j}" arg2="true"/>
+              </or>
+              <then>
+                <copy todir="${importNouveaux.dir}/${envName}/${map4jDir}">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/map4j" excludes="${map4jDir.excludes}"/>
+                </copy>
+              </then>
+            </if>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${mappingDir}" arg2="$${mappingDir}"/>
+          </not>
+          <then>
+            <if>
+              <equals arg1="${mappingDir.includes}" arg2="$${mappingDir.includes}"/>
+              <then>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${mappingDir}">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/mapping" excludes="${mappingDir.excludes}"/>
+                </copy>
+              </then>
+              <else>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${mappingDir}">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/mapping"
+                           includes="${mappingDir.includes}"
+                           excludes="${mappingDir.excludes}"/>
+                </copy>
+              </else>
+            </if>
+            <if>
+              <or>
+                <equals arg1="${importer.nouveaux}" arg2="true"/>
+                <equals arg1="${importer.nouveaux.maping}" arg2="true"/>
+              </or>
+              <then>
+                <if>
+                  <equals arg1="${mappingDir.includes}" arg2="$${mappingDir.includes}"/>
+                  <then>
+                    <copy todir="${importNouveaux.dir}/${envName}/${mappingDir}">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/mapping" excludes="${mappingDir.excludes}"/>
+                    </copy>
+                  </then>
+                  <else>
+                    <copy todir="${importNouveaux.dir}/${envName}/${mappingDir}">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/mapping" includes="${mappingDir.includes}"
+                               excludes="${mappingDir.excludes}"/>
+                    </copy>
+                  </else>
+                </if>
+              </then>
+            </if>
+          </then>
+        </if>
+
+        <if>
+          <not>
+            <equals arg1="${sqlDir}" arg2="$${sqlDir}"/>
+          </not>
+          <then>
+            <if>
+              <equals arg1="${sqlDir.includes}" arg2="$${sqlDir.includes}"/>
+              <then>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${sqlDir}">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/sql" excludes="${sqlDir.excludes}"/>
+                </copy>
+              </then>
+              <else>
+                <copy todir="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}/${sqlDir}">
+                  <fileset dir="${cvs.dir}/${cvs.module.source}/sql"
+                           includes="${sqlDir.includes}"
+                           excludes="${sqlDir.excludes}"/>
+                </copy>
+              </else>
+            </if>
+            <if>
+              <or>
+                <equals arg1="${importer.nouveaux}" arg2="true"/>
+                <equals arg1="${importer.nouveaux.sql}" arg2="true"/>
+              </or>
+              <then>
+                <if>
+                  <equals arg1="${sqlDir.includes}" arg2="$${sqlDir.includes}"/>
+                  <then>
+                    <copy todir="${importNouveaux.dir}/${envName}/${sqlDir}">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/sql" excludes="${sqlDir.excludes}"/>
+                    </copy>
+                  </then>
+                  <else>
+                    <copy todir="${importNouveaux.dir}/${envName}/${sqlDir}">
+                      <fileset dir="${cvs.dir}/${cvs.module.source}/sql" includes="${sqlDir.includes}"
+                               excludes="${sqlDir.excludes}"/>
+                    </copy>
+                  </else>
+                </if>
+              </then>
+            </if>
+          </then>
+        </if>
+
+        <record name="${log.dir.env}/${envName}_copierFichiers.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          la livraison des sources web n'a pas été demandée
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- mise à jour des nouvelles versions des fichiers existants -->
+  <target name="commiterModifsInEnv">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 11 : Commit des modifications de l'environnement ${envName}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape11}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir.env}/${envName}_commiterModif.log" action="start"/>
+        <cvs dest="${cvs.dir}/${cvs.mainModule.dest.slash}${envName}"
+             command="commit -m 'livraison archi_${cvs.tag}'"
+             error="${cvs.commitModif.errfile}" append="true"
+            />
+        <record name="${log.dir.env}/${envName}_commiterModif.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          le commit des modifications n'a pas été demandé
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <!-- import des nouveaux fichiers créés dans l'archi -->
+  <target name="importerNouveaux">
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      ETAPE 12 : Import des nouveaux fichiers dans l'environnement ${envName}
+      *********************************************************************
+    </echo>
+    <if>
+      <equals arg1="${etape12}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir.env}/${envName}_importerNouveaux.log" action="start"/>
+
+        <if>
+          <equals arg1="${cvs.branche}" arg2="${cvs.tronc}"/>
+          <then>
+            <if>
+              <not>
+                <equals arg1="${webDir}" arg2="$${webDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${webDir}/jsp/arc"
+                     command="import -m 'import archi_${cvs.tag}' ${cvs.mainModule.dest.slash}${envName}/${webDir}/jsp/arc avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${webDir}/WEB-INF"
+                     command="import -m 'import archi_${cvs.tag}' ${cvs.mainModule.dest.slash}${envName}/${webDir}/WEB-INF avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers web dans ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${map4jDir}" arg2="$${map4jDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${map4jDir}"
+                     command="import -m 'import archi_${cvs.tag}' ${cvs.mainModule.dest.slash}${envName}/${map4jDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers map4j dans ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${mappingDir}" arg2="$${mappingDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${mappingDir}"
+                     command="import -m 'import archi_${cvs.tag}' ${cvs.mainModule.dest.slash}${envName}/${mappingDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers de mapping dans ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${sqlDir}" arg2="$${sqlDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${sqlDir}"
+                     command="import -m 'import archi_${cvs.tag}' ${cvs.mainModule.dest.slash}${envName}/${sqlDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers sql dans ${envName}</echo>
+              </then>
+            </if>
+
+
+          </then>
+          <else>
+            <if>
+              <not>
+                <equals arg1="${webDir}" arg2="$${webDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${webDir}/jsp/arc"
+                     command="import -m 'import archi_${cvs.tag}' -b ${cvs.branche} ${cvs.mainModule.dest.slash}${envName}/${webDir}/jsp/arc avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${webDir}/WEB-INF"
+                     command="import -m 'import archi_${cvs.tag}' -b ${cvs.branche}  ${cvs.mainModule.dest.slash}${envName}/${webDir}/WEB-INF avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers web dans la branche ${cvs.branche} de ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${map4jDir}" arg2="$${map4jDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${map4jDir}"
+                     command="import -m 'import archi_${cvs.tag}' -b ${cvs.branche} ${cvs.mainModule.dest.slash}${envName}/${map4jDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers map4j dans la branche ${cvs.branche} de ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${mappingDir}" arg2="$${mappingDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${mappingDir}"
+                     command="import -m 'import archi_${cvs.tag}' -b ${cvs.branche}  ${cvs.mainModule.dest.slash}${envName}/${mappingDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers de mapping dans la branche ${cvs.branche} de ${envName}</echo>
+              </then>
+            </if>
+
+            <if>
+              <not>
+                <equals arg1="${sqlDir}" arg2="$${sqlDir}"/>
+              </not>
+              <then>
+                <cvs cvsRoot="${cvs.root}"
+                     dest="${importNouveaux.dir}/${envName}/${sqlDir}"
+                     command="import -m 'import archi_${cvs.tag}' -b ${cvs.branche}  ${cvs.mainModule.dest.slash}${envName}/${sqlDir} avendor arelease"
+                     error="${cvs.errfile}" append="true"
+                    />
+                <echo>import nouveaux fichiers sql dans la branche ${cvs.branche} de ${envName}</echo>
+              </then>
+            </if>
+
+
+          </else>
+        </if>
+        <record name="${log.dir.env}/${envName}_importerNouveaux.log" action="stop"/>
+        <echo file="${log.file}" append="true">
+          OK
+        </echo>
+      </then>
+      <else>
+        <echo file="${log.file}" append="true">
+          l'import des nouveaux fichiers n'a pas été demandé
+        </echo>
+      </else>
+    </if>
+  </target>
+
+  <target name="cleanAtEnd" depends="importerNouveaux">
+    <delete dir="${build.dir}"/>
+    <delete dir="${buildDebug.dir}"/>
+    <delete dir="${build15.dir}"/>
+    <delete dir="${buildDebug15.dir}"/>
+    <delete dir="${javaDoc.dir}"/>
+    <delete dir="${cvs.dir}"/>
+  </target>
+
+  <target name="make" depends="init">
+    <!-- packaging de l'archi ....-->
+    <antcall target="makeJars" />
+
+    <!-- livraison de l'archi dans l'environnement hermes-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="hermes"/>
+      <param name="envIndex" value="1"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement hermesLdap-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="hermesLdap"/>
+      <param name="envIndex" value="2"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement eFluidNetServer-->
+    <!--
+    <antcall target="livraisonEnv">
+      <param name="envName" value="eFluidNetServer"/>
+      <param name="envIndex" value="3"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+    -->
+
+    <!-- livraison de l'archi dans l'environnement eFluidEDK-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="eFluidEDK"/>
+      <param name="envIndex" value="4"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement eFluidNet-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="eFluidNet"/>
+      <param name="envIndex" value="5"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement eFluidPub-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="eFluidPub"/>
+      <param name="envIndex" value="6"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement AEL-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="ael"/>
+      <param name="envIndex" value="7"/>
+      <param name="cvs.mainModule.dest" value="Developpement_dev"/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement suivefluid-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="suivefluid"/>
+      <param name="envIndex" value="8"/>
+      <param name="cvs.mainModule.dest" value=""/>
+    </antcall>
+
+    <!-- livraison de l'archi dans l'environnement formation-->
+    <antcall target="livraisonEnv">
+      <param name="envName" value="formation"/>
+      <param name="envIndex" value="9"/>
+      <param name="cvs.mainModule.dest" value=""/>
+    </antcall>
+  	
+  	<!-- livraison de l'archi dans l'environnement librairies de l'IT -->
+  	<antcall target="livraisonEnv">
+  	  <param name="envName" value="hermesArchi"/>
+  	  <param name="envIndex" value="10"/>
+  	  <param name="cvs.mainModule.dest" value="librairies"/>
+  	</antcall>
+
+    <!-- livraison de l'archi dans l'environnement Build4J -->
+  	<antcall target="livraisonEnv">
+  	  <param name="envName" value="Build4J"/>
+  	  <param name="envIndex" value="11"/>
+  	  <param name="cvs.mainModule.dest" value=""/>
+  	</antcall>
+  	
+  	<!-- livraison de l'archi dans l'environnement ethaque-->
+		<antcall target="livraisonEnv">
+			<param name="envName" value="ethaque"/>
+			<param name="envIndex" value="12"/>
+			<param name="cvs.mainModule.dest" value=""/>
+		</antcall>
+
+    <!-- nettoyage après livraison -->
+    <!--<antcall target="cleanAtEnd"/>-->
+  </target>
+</project>

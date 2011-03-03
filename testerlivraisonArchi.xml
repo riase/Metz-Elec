@@ -1,0 +1,688 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="testerlivraisonArchi" default="make" basedir="..">
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+   *********************************************************************
+    Ce sript permet de tester la livraison de l'architecture dans le fonctionnel
+    La version à livrer est taggée.
+    Le fonctionnel cible se trouve dans une branche donnée ou dans le tronc.
+
+    Etapes du scripts :
+      Initialisations
+      1. checkout CVS (archi + fonctionnel)
+      2. compilation de l'archi + jar
+      3. copie des fichiers de l'archi sous le fonctionnel
+
+    Ce script attend en paramètre :
+
+   OBLIGATOIRES
+     cvs.tag				: nom du tag de l'archi
+     cvs.branche		: nom de la branche du fonctionnel où on livre, TRONC si c'est le tronc.
+
+   FACULTATIFS
+
+     cvs.login			: nom du user pour la connexion à CVS. Par défaut ce paramètre vaut adminARCHI
+     cvs.server 		: nom du serveur sur lequel se trouve la base CVS. Par défaut hermescvs
+     cvs.repo			: nom du repository CVS. Par défaut DEV
+   Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+     etape 				: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+
+   Avant de lancer le script fixer les paramètres d'environnement.
+
+   JAVA_HOME : rép. d'install du JDK
+   ANT_HOME : rép. d'install de ANT
+   CVS_HOME : rép. d'install de CVS
+   TOMCAT_HOME : rép. install de tomcat 6.0.xx pour la compilation des JSP
+   set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVS_HOME%
+
+   La chaîne de lancement est par exemple :
+
+   ant -f livrerArchi.xml -Dcvs.tag=V3_0_1 -Dcvs.branche=HERMES_3_0
+     [ -Dcvs.login=mrabti_s -Dcvs.serveur=lausanne -Dcvs.repo=DEV -Detape=2 ]
+
+   *********************************************************************
+   -->
+
+  <property name="root" value="${basedir}"/>
+  <property name="livraison.dir" value="${root}/livraison"/>
+  <property name="ressources.dir" value="${root}/ressources"/>
+  <property name="build.dir" value="${root}/tmp/classes"/>
+
+  <property environment="env"/>
+  <property name="catalina.home" value="${env.TOMCAT_HOME}" />
+  <property name="jsp.gen.dir" value="${root}/tmp/jspSrc"/>
+  <property name="jsp.build.dir" value="${root}/tmp/jspClasses"/>
+
+  <!--
+   *********************************************************************
+     librairies nécessaires pour la compilation.
+     Le lecteur I doit être mappé sur Zurich\Java à Paris
+   *********************************************************************
+   -->
+  <property name="lib.dir" value="${root}/scripts/lib"/>
+  <property name="ldap.home" value="I:/ldap"/>
+  <property name="oracle.home" value="I:/Oracle"/>
+  <property name="weblo.home" value="I:/weblogic/WL81SP5"/>
+
+
+  <!--
+   *********************************************************************
+     les parametres CVS
+   *********************************************************************
+   -->
+  <property name="tmp.dir" value="${root}/tmp"/>
+
+  <property name="cvs.dir" value="${tmp.dir}/checkout"/>
+
+  <property name="cvs.module.source" value="HermesArchi"/>
+  <property name="cvs.module.dest" value="Developpement_dev/Hermes"/>
+  <property name="cvs.dest.dir" value="Developpement_dev/Hermes"/>
+
+  <property name="cvs.source.dir" value="${cvs.dir}/${cvs.module.source}"/>
+  <property name="jar.dir" value="${cvs.source.dir}/lib"/>
+  <property name="jar1.5.dir" value="${cvs.source.dir}/lib1.5"/>
+  <property name="source.dir" value="${cvs.source.dir}/src"/>
+  <property name="properties.dir" value="${cvs.source.dir}/properties"/>
+  <property name="map4j.dir" value="${cvs.source.dir}/map4j"/>
+  <property name="web.dir" value="${cvs.source.dir}/tomcat/hermes"/>
+  <property name="tlds.dir" value="${web.dir}/WEB-INF/tlds"/>
+  <property name="webApp.tempdir" value="${cvs.dir}/WebApp"/>
+
+  <property name="cvs.tronc" value="TRONC"/>
+  <property name="cvs.update.ok" value="Y"/>
+
+
+  <!--
+   *********************************************************************
+   les fichiers JAR à livrer
+   *********************************************************************
+   -->
+  <property name="manifest.classpath" value="frameworkDebug.jar frameworkEnterpriseDebug.jar poi-2.5.1-final-20040804.jar"/>
+  <property name="archi_jar" value="${livraison.dir}/HermesArchiDebug.jar"/>
+  <property name="archiSrc_jar" value="${livraison.dir}/HermesArchiSrc.jar"/>
+  <property name="archi.jar.exclude" value="**/ECodeEdition*.*,**/EClasse*.*,**/EUniteCritere*.*"/>
+
+  <property name="hermes_jar" value="${cvs.dir}/${cvs.dest.dir}/lib/HermesDebug.jar"/>
+
+  <property name="etapeAutorisee" value="Y"/>
+  <property name="etapeNonAutorisee" value="N"/>
+
+
+  <!--
+  *********************************************************************
+  le classPath pour la compilation
+  *********************************************************************
+   -->
+  <path id="project.class.path">
+    <fileset dir="${jar.dir}">
+      <include name="**/*.jar"/>
+    </fileset>
+    <fileset dir="${oracle.home}">
+      <include name="*.jar"/>
+    </fileset>
+    <fileset dir="${weblo.home}">
+      <include name="**/*.jar"/>
+    </fileset>
+  </path>
+
+  <path id="project.class.path.1.5">
+    <fileset dir="${jar1.5.dir}">
+      <include name="**/*.jar"/>
+      <exclude name="**/*Debug.jar"/>
+    </fileset>
+    <path refid="project.class.path"/>
+  </path>
+
+  <!-- la cible d'initialisation -->
+  <target name="init">
+
+    <fail message="la propriété cvs.tag est obligatoire.">
+      <condition>
+        <not><isset property="cvs.tag"/></not>
+      </condition>
+    </fail>
+    <property name="tag.dir" value="${tmp.dir}/${cvs.tag}"/>
+
+    <buildnumber file="${root}/buildtest.number"/>
+    <tstamp>
+      <format property="TODAY_UK" pattern="dd/MM/yyyy hh:mm:ss" locale="en"/>
+    </tstamp>
+
+    <property name="log.dir" value="${tag.dir}/${build.number} - tester ${cvs.tag}"/>
+    <property name="log.file" value="${log.dir}/testLivraisonArchi.log"/>
+    <mkdir dir="${log.dir}"/>
+
+    <echo file="${log.file}" append="true">
+      *********************************************************************
+      Lancement du script de test de livraison de l'archi
+      *********************************************************************
+    </echo>
+
+
+    <condition property="useJDK1.5">
+      <and>
+        <not>
+          <equals arg1="${ant.java.version}" arg2="1.5"/>
+        </not>
+        <isset property="jdk1.5.home"/>
+        <available file="${jdk1.5.home}/bin/javac.exe"/>
+      </and>
+    </condition>
+    <condition property="jdk.version" value="1.5" else="${java.version}">
+      <equals arg1="${useJDK1.5}" arg2="true"/>
+    </condition>
+
+
+    <!-- connexion à CVS -->
+    <if>
+      <equals arg1="${cvs.login}" arg2="$${cvs.login}"/>
+      <then>
+        <property name="cvs.login" value="adminARCHI"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.server}" arg2="$${cvs.server}"/>
+      <then>
+        <property name="cvs.server" value="hermescvs"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${cvs.repo}" arg2="$${cvs.repo}"/>
+      <then>
+        <property name="cvs.repo" value="/DEV"/>
+      </then>
+    </if>
+    <property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+    <if>
+      <isset property="etape"/>
+      <else>
+        <property name="etape" value="1"/>
+      </else>
+    </if>
+
+    <echo file="${log.file}" append="true">
+      Etape de démarrage du script : ${etape}
+    </echo>
+    <switch value="${etape}">
+      <case value="2">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 2 - Compilation des sources java de ${source.dir} vers ${build.dir}"/>
+      </case>
+      <case value="3">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 3 - Creation du jar de l'archi"/>
+      </case>
+      <case value="4">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 4 - Checkout de ${cvs.module.dest}"/>
+      </case>
+      <case value="5">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 5 - Copie des fichiers de l'archi vers le fonctionnel"/>
+      </case>
+      <case value="6">
+        <property name="etape1" value="${etapeNonAutorisee}"/>
+        <property name="etape2" value="${etapeNonAutorisee}"/>
+        <property name="etape3" value="${etapeNonAutorisee}"/>
+        <property name="etape4" value="${etapeNonAutorisee}"/>
+        <property name="etape5" value="${etapeNonAutorisee}"/>
+        <property name="etapeDescr" value="ETAPE 6 - Création du war"/>
+      </case>
+      <default>
+        <echo file="${log.file}" append="true">
+          => Cas par défaut. Toutes les étapes du script seront exécutées
+        </echo>
+      </default>
+    </switch>
+    <!--
+        les property qui n'auraient pas été valuées précédemment le sont à présent.
+        La valeur mise fait en sorte que l'étape est autorisée.
+      -->
+    <property name="etapeDescr" value="ETAPE 1 - Checkout de ${cvs.module.source}"/>
+    <property name="etape1" value="${etapeAutorisee}"/>
+    <property name="etape2" value="${etapeAutorisee}"/>
+    <property name="etape3" value="${etapeAutorisee}"/>
+    <property name="etape4" value="${etapeAutorisee}"/>
+    <property name="etape5" value="${etapeAutorisee}"/>
+    <property name="etape6" value="${etapeAutorisee}"/>
+    <property name="etape7" value="${etapeAutorisee}"/>
+    <input addproperty="compil.batch" message="compilation batchs? " defaultvalue="Y" validargs="Y,N"/>
+
+    <echo file="${log.file}" append="true">
+      Chaine de connexion à CVS : ${cvs.root}
+      Module  : ${cvs.module.source}
+      Branche : ${cvs.branche}
+      Tag     : ${cvs.tag}
+      debut   : ${etapeDescr}
+      use JDK 1.5 : ${useJDK1.5} (${jdk1.5.home})
+    </echo>
+    <echo>
+Chaine de connexion à CVS : ${cvs.root}
+Module  : ${cvs.module.source}
+Branche : ${cvs.branche}
+Tag     : ${cvs.tag}
+debut   : ${etapeDescr}
+use JDK 1.5 : ${useJDK1.5} (${jdk1.5.home}) ${jdk.version}
+    </echo>
+    <input message="OK pour tester la livraison? (Y/N)"
+           addproperty="livraison.ok"/>
+    <fail message="test de la livraison abandonné!">
+      <condition>
+        <equals arg1="${livraison.ok}" arg2="N" casesensitive="false"/>
+      </condition>
+    </fail>
+  </target>
+
+
+  <!--
+   *********************************************************************
+   Récupération d'une copie locale de l'archi dans le répertoire tmp
+
+   Les sources de l'archi ne sont pas updatés. Il faut voir d'abord
+   ce qui marche (avec éventuellement un retour en arrière pour
+   certains fichiers qui ne doivent pas être livrés)
+   *********************************************************************
+   -->
+  <target name="getFromCVS" depends="init">
+  	<record name="${log.dir}/getFromCVS.log" action="start"/>
+    <if>
+      <and >
+        <equals arg1="${cvs.update}" arg2="${cvs.update.ok}"/>
+        <equals arg1="${etape1}" arg2="${etapeAutorisee}"/>
+      </and>
+      <then>
+        <delete dir="${cvs.dir}"/>
+        <mkdir dir="${cvs.dir}"/>
+
+        <!-- ARCHI -->
+        <if>
+          <equals arg1="${cvs.tag}" arg2="LAST"/>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.source}" dest="${cvs.dir}"/>
+          </then>
+          <else>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.source}" dest="${cvs.dir}"
+                 command="checkout -P -r ${cvs.tag}"/>
+          </else>
+        </if>
+      </then>
+    </if>
+    <record name="${log.dir}/getFromCVS.log" action="stop"/>
+  </target>
+
+
+  <!--
+   *********************************************************************
+   Compilation des sources java de ${source.dir} vers ${build.dir}
+   Génération et compilation des JSP
+   *********************************************************************
+   -->
+  <target name="compil" depends="getFromCVS">
+    <if>
+      <equals arg1="${etape2}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir}/compil.log" action="start"/>
+        <delete dir="${build.dir}"/>
+        <mkdir dir="${build.dir}"/>
+        <if>
+          <equals arg1="${useJDK1.5}" arg2="true"/>
+          <then>
+            <echo>compilation utilisant le JDK 1.5 : ${jdk1.5.home}</echo>
+            <javac srcdir="${source.dir}" destdir="${build.dir}" debug="on"
+                   fork="yes" executable="${jdk1.5.home}/bin/javac" compiler="javac1.5">
+              <classpath refid="project.class.path.1.5"/>
+            </javac>
+          </then>
+          <else>
+            <echo>compilation utilisant le JDK ${ant.java.version}</echo>
+            <javac srcdir="${source.dir}" destdir="${build.dir}" debug="on">
+              <classpath refid="project.class.path"/>
+            </javac>
+          </else>
+        </if>
+
+        <!--
+        *********************************************************************
+        Génération et Compilation des JSP
+        *********************************************************************
+        -->
+				<if>
+          <available file="${catalina.home}" type="dir"/>
+          <then>
+            <echo />
+            <echo>*******************************************</echo>
+            <echo>Génération des JSP avec JASPER (tomcat 6.0)</echo>
+            <delete dir="${jsp.gen.dir}"/>
+            <mkdir dir="${jsp.gen.dir}"/>
+            <delete dir="${jsp.build.dir}"/>
+            <mkdir dir="${jsp.build.dir}"/>
+            <taskdef resource="org/apache/catalina/ant/catalina.tasks">
+              <classpath>
+                <fileset file="${catalina.home}/bin/tomcat-juli.jar"/>
+                <fileset file="${catalina.home}/lib/jasper.jar"/>
+                <fileset file="${catalina.home}/lib/jasper-el.jar"/>
+                <fileset file="${catalina.home}/lib/el-api.jar"/>
+                <fileset file="${catalina.home}/lib/jsp-api.jar"/>
+                <fileset file="${catalina.home}/lib/servlet-api.jar"/>
+                <fileset file="${catalina.home}/lib/catalina-ant.jar"/>
+                <pathelement location="${build.dir}"/>
+                <fileset dir="${jar.dir}" excludes="**/*Doc.jar, **/*Src.jar, **/*Debug.jar, **/saaj-1_2-fr-api.jar"/>
+              </classpath>
+            </taskdef>
+            <jasper validateXml="false" uriroot="${web.dir}" outputDir="${jsp.gen.dir}" />
+            <echo>Compilation des JSP générés avec JASPER (tomcat 6.0)</echo>
+            <javac srcdir="${jsp.gen.dir}" destdir="${jsp.build.dir}">
+              <classpath>
+                  <fileset dir="${catalina.home}/lib"/>
+                  <pathelement location="${build.dir}"/>
+                  <fileset dir="${jar.dir}" excludes="**/*Doc.jar, **/*Src.jar, **/*Debug.jar, **/saaj-1_2-fr-api.jar"/>
+                </classpath>
+            </javac>
+            <echo>*******************************************</echo>
+          </then>
+          <else>
+            <echo />
+            <echo>******************************************************</echo>
+            <echo>Génération des JSP impossibles. Tomcat 6.0 non trouvé : ${catalina.home}</echo>
+            <echo>******************************************************</echo>
+          </else>
+        </if>
+
+        <record name="${log.dir}/compil.log" action="stop"/>
+      </then>
+    </if>
+  </target>
+
+  <!--
+   *********************************************************************
+   Création du jar de l'archi
+     - un jar pour les classes (compilées) + les properties (sauf le
+       framework.properties du répertoire racine.
+    *********************************************************************
+   -->
+  <target name="makeJar" depends="compil">
+
+    <if>
+      <equals arg1="${etape3}" arg2="${etapeAutorisee}"/>
+      <then>
+        <delete dir="${livraison.dir}"/>
+        <mkdir dir="${livraison.dir}"/>
+        <record name="${log.dir}/makeJar.log" action="start"/>
+        <!-- Création du manifest du JAR-->
+        <copy todir="${build.dir}">
+          <fileset dir="${source.dir}">
+            <exclude name="**/*.java"/>
+            <exclude name="pom.xml"/>
+          </fileset>
+        </copy>
+        <copy todir="${build.dir}">
+          <fileset dir="${properties.dir}">
+            <exclude name="framework.properties"/>
+          </fileset>
+        </copy>
+        <delete file="${ressources.dir}\MANIFEST.MF"/>
+        <manifest file="${ressources.dir}\MANIFEST.MF">
+          <attribute name="Created-By" value="${jdk.version}"/>
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <attribute name="Class-Path" value='${manifest.classpath}'/>
+          <section name="com/hermes/arc/commun/businessobject/">
+            <attribute name="Specification-Title" value="Hermes architecture"/>
+            <attribute name="Specification-Version" value="${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France"/>
+            <attribute name="Implementation-Title" value="Hermes architecture"/>
+            <attribute name="Implementation-Version" value="${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France"/>
+          </section>
+        </manifest>
+        <!--
+        Recopie l'intégralité du projet d'intégration de l'archi de ${build} dans le fichier HermesArchi.jar
+        -->
+        <jar jarfile="${archi_jar}" basedir="${build.dir}"
+             manifest="${ressources.dir}\MANIFEST.MF"
+             excludes="${archi.jar.exclude}"
+            />
+        <record name="${log.dir}/makeJar.log" action="stop"/>
+      </then>
+    </if>
+
+
+  </target>
+
+  <!--
+   *********************************************************************
+   Récupération d'une copie locale du module fonctionnel dans le
+   répertoire tmp
+
+   Les sources de l'archi ne sont pas updatés. Il faut voir d'abord
+   ce qui marche (avec éventuellement un retour en arrière pour
+   certains fichiers qui ne doivent pas être livrés)
+   *********************************************************************
+   -->
+  <target name="getFonctionnelFromCVS" depends="makeJar">
+    <if>
+      <and>
+        <equals arg1="${cvs.update}" arg2="${cvs.update.ok}"/>
+        <equals arg1="${etape4}" arg2="${etapeAutorisee}"/>
+      </and>
+      <then>
+        <record name="${log.dir}/getFonctionnelFromCVS.log" action="start"/>
+        <!-- FONCTIONNEL -->
+        <if>
+          <equals arg1="${cvs.branche}" arg2="${cvs.tronc}"/>
+          <then>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/src" dest="${cvs.dir}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/lib" dest="${cvs.dir}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/properties" dest="${cvs.dir}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/xml" dest="${cvs.dir}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/tomcat/hermes/jsp" dest="${cvs.dir}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/tomcat/hermes/WEB-INF" dest="${cvs.dir}"/>
+          </then>
+          <else>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/src" dest="${cvs.dir}" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/lib" dest="${cvs.dir}" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/properties" dest="${cvs.dir}" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/xml" dest="${cvs.dir}" tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/tomcat/hermes/jsp" dest="${cvs.dir}"
+                 tag="${cvs.branche}"/>
+            <cvs cvsRoot="${cvs.root}" package="${cvs.module.dest}/tomcat/hermes/WEB-INF" dest="${cvs.dir}"
+                 tag="${cvs.branche}"/>
+          </else>
+        </if>
+        <record name="${log.dir}/getFonctionnelFromCVS.log" action="stop"/>
+      </then>
+    </if>
+
+  </target>
+
+  <!--
+   *********************************************************************
+   Récopie du jar de l'archi et des sources Web, properties, tlds
+   dans le fonctionnel
+
+   Attention n'est pas fait pour l'instant la suppression de fichiers
+   -> A faire à la main.
+
+   *********************************************************************
+   -->
+  <target name="copierFichiers" depends="getFonctionnelFromCVS">
+    <if>
+      <equals arg1="${etape5}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir}/copierFichiers.log" action="start"/>
+
+        <copy todir="${cvs.dir}/${cvs.dest.dir}/lib" overwrite="true">
+          <fileset dir="${livraison.dir}"/>
+        </copy>
+
+        <copy todir="${cvs.dir}/${cvs.dest.dir}/lib" overwrite="true">
+          <fileset dir="${jar.dir}" includes="framework*.jar"/>
+        </copy>
+
+        <if>
+          <equals arg1="${useJDK1.5}" arg2="true"/>
+          <then>
+            <copy todir="${cvs.dir}/${cvs.dest.dir}/lib" overwrite="true">
+              <fileset dir="${jar1.5.dir}" includes="framework*.jar"/>
+            </copy>
+          </then>
+        </if>
+
+        <copy todir="${cvs.dir}/${cvs.dest.dir}/tomcat/hermes/jsp/arc">
+          <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/jsp/arc"/>
+        </copy>
+
+        <copy todir="${cvs.dir}/${cvs.dest.dir}/tomcat/hermes/WEB-INF">
+          <fileset dir="${cvs.dir}/${cvs.module.source}/tomcat/hermes/WEB-INF"/>
+        </copy>
+
+        <copy todir="${cvs.dir}/${cvs.dest.dir}/map4j">
+          <fileset dir="${cvs.dir}/${cvs.module.source}/map4j"/>
+          <fileset dir="${jar.dir}">
+            <include name="framework*.jar"/>
+          </fileset>
+        </copy>
+
+        <record name="${log.dir}/copierFichiers.log" action="stop"/>
+      </then>
+    </if>
+  </target>
+
+  <target name="makeWar" depends="copierFichiers">
+
+    <path id="hermes.class.path">
+      <fileset dir="${cvs.dir}/${cvs.dest.dir}/lib">
+        <include name="**/*.jar"/>
+        <exclude name="*Debug.jar"/>
+        <exclude name="*Doc.jar"/>
+        <exclude name="*Src.jar"/>
+        <exclude name="Map4J.jar"/>
+        <exclude name="openTool.jar"/>
+      </fileset>
+      <fileset dir="${oracle.home}">
+        <include name="*.jar"/>
+      </fileset>
+      <fileset dir="${weblo.home}">
+        <include name="**/*.jar"/>
+      </fileset>
+      <fileset dir="${jar.dir}">
+        <include name="v*.jar"/>
+      </fileset>
+    </path>
+    <path id="hermesBatch.class.path">
+      <path refid="hermes.class.path"/>
+      <pathelement path="${cvs.dir}/${cvs.dest.dir}/classes"/>
+    </path>
+
+    <if>
+      <equals arg1="${etape6}" arg2="${etapeAutorisee}"/>
+      <then>
+        <record name="${log.dir}/makeWar.log" action="start"/>
+        <mkdir dir="${cvs.dir}/${cvs.dest.dir}/classes"/>
+
+        <record name="${log.dir}/compilApp.log" action="start"/>
+        <if>
+          <equals arg1="${useJDK1.5}" arg2="true"/>
+          <then>
+            <echo>compilation utilisant le JDK 1.5 : ${jdk1.5.home}</echo>
+            <javac srcdir="${cvs.dir}/${cvs.dest.dir}/src" destdir="${cvs.dir}/${cvs.dest.dir}/classes"
+                   excludes="**/batch/**,**/test/**,**/jeudetest/**,**/Test*.*" debug="on"
+                   fork="yes" executable="${jdk1.5.home}/bin/javac" compiler="javac1.5" memoryMaximumSize="512m">
+                 <classpath refid="hermes.class.path"/>
+            </javac>
+          </then>
+          <else>
+            <echo>compilation utilisant le JDK ${ant.java.version}</echo>
+            <javac srcdir="${cvs.dir}/${cvs.dest.dir}/src" destdir="${cvs.dir}/${cvs.dest.dir}/classes"
+                   excludes="**/batch/**,**/test/**,**/jeudetest/**,**/Test*.*" debug="on">
+                 <classpath refid="hermes.class.path"/>
+            </javac>
+          </else>
+        </if>
+
+        <mkdir dir="${cvs.dir}/${cvs.dest.dir}/classesBatch"/>
+        <if>
+          <equals arg1="${compil.batch}" arg2="Y"/>
+          <then>
+            <if>
+              <equals arg1="${useJDK1.5}" arg2="true"/>
+              <then>
+                <echo>compilation batchs utilisant le JDK 1.5 : ${jdk1.5.home}</echo>
+                <javac srcdir="${cvs.dir}/${cvs.dest.dir}/src" destdir="${cvs.dir}/${cvs.dest.dir}/classesBatch"
+                       includes="**/batch/**" debug="on"
+                       fork="yes" executable="${jdk1.5.home}/bin/javac" compiler="javac1.5" memoryMaximumSize="512m">
+                     <classpath refid="hermesBatch.class.path"/>
+                </javac>
+              </then>
+              <else>
+                <echo>compilation batchs utilisant le JDK ${ant.java.version}</echo>
+                <javac srcdir="${cvs.dir}/${cvs.dest.dir}/src" destdir="${cvs.dir}/${cvs.dest.dir}/classesBatch"
+                       includes="**/batch/**" debug="on">
+                     <classpath refid="hermesBatch.class.path"/>
+                </javac>
+              </else>
+            </if>
+          </then>
+          <else>
+            <echo>compilation batchs non demande</echo>            
+          </else>
+        </if>
+
+
+        <record name="${log.dir}/compilApp.log" action="stop"/>
+
+        <manifest file="${ressources.dir}\MANIFEST_efluid.MF">
+          <attribute name="Created-By" value="${jdk.version}"/>
+          <attribute name="Built-By" value="${user.name}"/>
+          <attribute name="Built-Date" value='${TODAY_UK}'/>
+          <section name="com/hermes/ref/acteur/businessobject/">
+            <attribute name="Specification-Title" value="efluid"/>
+            <attribute name="Specification-Version" value="TEST_LIV_ARC_${cvs.tag}"/>
+            <attribute name="Specification-Vendor" value="CGI France"/>
+            <attribute name="Implementation-Title" value="efluid"/>
+            <attribute name="Implementation-Version" value="TEST_LIV_ARC_${cvs.tag}"/>
+            <attribute name="Implementation-Vendor" value="CGI France"/>
+          </section>
+        </manifest>
+
+        <!--
+        Recopie l'intégralité de ${build} dans le fichier HermesAppli.jar
+        -->
+        <jar jarfile="${hermes_jar}" basedir="${cvs.dir}/${cvs.dest.dir}/classes"
+              manifest="${ressources.dir}\MANIFEST_efluid.MF"
+        />
+
+        <delete file="${root}/hermesTest.war"/>
+
+        <war warfile="${root}/hermesTest.war" webxml="${cvs.dir}/${cvs.dest.dir}/tomcat/hermes/WEB-INF/web.xml"
+             update="true">
+          <fileset dir="${cvs.dir}/${cvs.dest.dir}/tomcat/hermes" includes="jsp/**" excludes="**/*.psd,WEB-INF/**"/>
+          <classes dir="${cvs.dir}/${cvs.dest.dir}/properties" includes="**/*.properties"/>
+          <classes dir="${cvs.dir}/${cvs.dest.dir}/src" includes="**/*.properties,**/*.xml"/>
+          <classes dir="${cvs.dir}/${cvs.dest.dir}/xml" includes="**/*.xml"/>
+          <classes dir="${root}/parametrage" includes="**/*.xml,**/*.properties"/>
+          <lib dir="${cvs.dir}/${cvs.dest.dir}/lib"
+               excludes="framework.jar,frameworkEnterprise.jar,HermesArchi.jar,efluidEDK.jar,efluidEDKBatch*,efluidEDKTest*,*Src.jar,*Doc.jar"/>
+          <webinf dir="${cvs.dir}/${cvs.dest.dir}/tomcat/hermes/WEB-INF"/>
+        </war>
+        <record name="${log.dir}/makeWar.log" action="stop"/>
+      </then>
+    </if>
+
+  </target>
+
+  <target name="make">
+    <antcall target="makeWar"/>
+  </target>
+</project>

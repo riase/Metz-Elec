@@ -1,0 +1,427 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="creationZipEnvs" default="make" basedir="..">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!--
+	*********************************************************************
+	 Ce sript permet de créer un zip des l'env. de dev et d'archi pour une
+	 branche donnée
+
+	 Etapes du scripts :
+	 	Initialisations
+	 	1. checkout CVS (archi + fonctionnel)
+	 	2. création des zips
+
+	 Ce script attend en paramètre :
+
+	FACULTATIFS
+	  env.version		: nom de la version où on livre, (4_0) par exemple.
+	  recup.full    : indique s'il on veut récupérer un environnement complet
+    clean.recup	  : dans le cas de la récupération d'un env. complet, indique s'il faut supprimer les répertoires inutiles
+		cvs.login			: nom du user pour la connexion à CVS. Par défaut ce paramètre vaut adminDev
+		cvs.server 		: nom du serveur sur lequel se trouve la base CVS. Par défaut lausanne
+		cvs.repo			: nom du repository CVS. Par défaut DEV
+	Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+		etape 				: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+
+	Avant de lancer le script fixer les paramètres d'environnement.
+
+	JAVA_HOME
+	ANT_HOME
+	CVS_HOME
+	set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVS_HOME%
+
+	La chaîne de lancement est par exemple :
+
+	ant -f creationZipEnv.xml -Dcvs.branche=HERMES_3_0
+		[ -Dcvs.login=mrabti_s -Dcvs.serveur=lausanne -Dcvs.repo=DEV]
+
+	*********************************************************************
+	-->
+
+	<property name="root" value="${basedir}"/>
+	<property name="zip.dir" value="${root}\zips"/>
+
+	<!--
+	*********************************************************************
+  	les parametres CVS
+	*********************************************************************
+	-->
+	<property name="tmp.dir" value="${root}/tmp"/>
+	<property name="cvs.dir.root" value="${tmp.dir}"/>
+  <property name="resources.dir" value="${root}\resources"/>
+  <property name="cvs.tronc" value="TRONC"/>
+
+  <property name="cmd.checkout" value="-r checkout"/>
+  <property name="cmd.checkout.empty" value="-r checkout -l"/>
+
+
+  <!-- la cible d'initialisation -->
+	<target name="init" depends="">
+		<property name="log.dir" value="${tmp.dir}"/>
+    <mkdir dir="${log.dir}"/>
+    <property name="log.file" value="${log.dir}/creationZipEnvs.log"/>
+
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+		Récupération des environnnements et création des zips
+		*********************************************************************
+		</echo>
+
+    <if>
+			<equals arg1="${env.version}" arg2="$${env.version}" />
+			<then>
+        <input message="Quelle version voules-vous récupérer (ex : 3_0 ou TRONC)?" addproperty="env.version" />
+      </then>
+    </if>
+    <if>
+			<equals arg1="${archi.ok}" arg2="$${archi.ok}" />
+			<then>
+				<input message="Voulez-vous traiter l'archi (Y/N)?" addproperty="archi.ok" />
+			</then>
+    </if>
+    <if>
+			<equals arg1="${dev.ok}" arg2="$${dev.ok}" />
+			<then>
+				<input message="Voulez-vous traiter le DEV (Y/N)?" addproperty="dev.ok" />
+			</then>
+    </if>
+    <property name="cvs.module.archi" value="HermesArchi"/>
+	  <property name="cvs.module.dev" value="Developpement_dev"/>
+    <if>
+      <equals arg1="${env.version}" arg2="${cvs.tronc}"/>
+      <then>
+        <property name="cvs.branche" value="${cvs.tronc}"/>
+        <property name="zip.dev" value="${zip.dir}\Developpement_dev.zip"/>
+        <property name="zip.archi" value="${zip.dir}\HermesArchi.zip"/>
+        <property name="resources.dev" value="${resources.dir}\Developpement_dev"/>
+      </then>
+      <else>
+        <property name="cvs.branche" value="HERMES_${env.version}"/>
+        <property name="zip.dev" value="${zip.dir}\Developpement_${env.version}.zip"/>
+        <property name="zip.archi" value="${zip.dir}\HermesArchi_${env.version}.zip"/>
+        <property name="resources.dev" value="${resources.dir}\Developpement_${env.version}"/>
+      </else>
+    </if>
+    <property name="cvs.dir" value="${cvs.dir.root}\${env.version}"/>
+    <property name="dest.archi" value="${cvs.dir}\${cvs.module.archi}"/>
+    <property name="dest.dev" value="${cvs.dir}\${cvs.module.dev}"/>
+    <property name="build.dir" value="${dest.dev}\hermes\classes"/>
+
+    <!-- connexion à CVS -->
+		<if>
+			<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+			<then>
+				<property name="cvs.login" value="adminDEV"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+			<then>
+				<property name="cvs.server" value="hermescvs"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+			<then>
+				<property name="cvs.repo" value="/DEV"/>
+			</then>
+		</if>
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+		<echo file="${log.file}" append="true">
+			cvs.root      : ${cvs.root}
+			cvs.branche   : ${cvs.branche}
+			zip.dev       : ${zip.dev}
+			zip.archi     : ${zip.archi}
+			resources.dev : ${resources.dev}
+			cvs.dir       : ${cvs.dir}
+			dest.archi    : ${dest.archi}
+			dest.dev      : ${dest.dev}
+			build.dir     : ${build.dir}
+		</echo>
+		
+		<echo append="true">
+					Chaine de connexion à CVS : ${cvs.root}
+					version : ${env.version}
+					Branche : ${cvs.branche}
+					Archi   : ${archi.ok}
+					DEV     : ${dev.ok}
+		</echo>
+	</target>
+
+
+	<!--
+	*********************************************************************
+  Récupération d'une copie locale du module fonctionnel dans le
+  répertoire tmp
+
+  Les sources de l'archi ne sont pas updatés. Il faut voir d'abord
+  ce qui marche (avec éventuellement un retour en arrière pour
+  certains fichiers qui ne doivent pas être livrés)
+	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="">
+    <record name="${log.dir}/getFromCvs.log" action="start" />
+    <if>
+		  <equals arg1="${dev.ok}" arg2="Y" />
+    	<then>
+				<if>
+					<equals arg1="${recup.full}" arg2="$${recup.full}" />
+					<then>
+						<input message="Voulez-vous récupérer un environnement complet?" addproperty="recup.full" validargs="Y,N"/>
+					</then>
+				</if>
+			</then>
+		</if>
+    <delete dir="${cvs.dir}"/>
+    <mkdir dir="${cvs.dir}"/>
+
+
+    <if>
+      <equals arg1="${cvs.branche}" arg2="${cvs.tronc}" />
+    <then>
+      <!-- récupération TRONC-->
+      <!-- ARCHI -->
+      <if>
+			  <equals arg1="${archi.ok}" arg2="Y" />
+    		<then>
+    		  <cvs cvsRoot="${cvs.root}" package="${cvs.module.archi}" dest="${cvs.dir}" />
+    		</then>
+    	</if>
+      <!-- DEV -->
+      <if>
+			  <equals arg1="${dev.ok}" arg2="Y" />
+    		<then>
+					<if>
+						<equals arg1="${recup.full}" arg2="N" />
+						<then>
+							<!-- DEV -->
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\ael" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidNetServer" dest="${cvs.dir}" command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidNet" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidPub" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\doc" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\lib" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\map4j" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\mapping" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\modele" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\properties" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\scripts" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\contraintes" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\data" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\ddl" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\index" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\vues" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\src" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\help" dest="${cvs.dir}"  command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\jsp" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\WEB-INF" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\xml" dest="${cvs.dir}"  command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\HermesLdap" dest="${cvs.dir}" command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\HermesStrS" dest="${cvs.dir}" command="${cmd.checkout.empty}"/>
+							<copy todir="${cvs.dir}\${cvs.module.dev}">
+								<fileset dir="${resources.dev}" defaultexcludes="no"/>
+							</copy>
+						</then>
+						<else>
+							<!-- DEV -->
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}" dest="${cvs.dir}" command="${cmd.checkout}"/>
+							<antcall target="cleanRecup"/>
+						</else>
+					</if>
+				</then>
+			</if>
+    </then>
+    <else>
+      <!-- récupération d'une branche particulière -->
+      <!-- ARCHI -->
+      <if>
+			  <equals arg1="${archi.ok}" arg2="Y" />
+    		<then>
+      		<cvs cvsRoot="${cvs.root}" package="${cvs.module.archi}" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+      	</then>
+      </if>
+      <if>
+				<equals arg1="${dev.ok}" arg2="Y" />
+    		<then>
+					<if>
+						<equals arg1="${recup.full}" arg2="N" />
+						<then>
+							<!-- DEV -->
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\ael" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidNetServer" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidNet" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\eFluidPub" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\doc" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\lib" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\map4j" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\mapping" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\modele" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\properties" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\scripts" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\contraintes" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\data" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\ddl" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\index" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\sql\vues" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\src" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\help" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\jsp" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\tomcat\hermes\WEB-INF" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\Hermes\xml" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\HermesLdap" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout.empty}"/>
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}\HermesStrS" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout.empty}"/>
+							<copy todir="${cvs.dir}\${cvs.module.dev}">
+								<fileset dir="${resources.dev}" defaultexcludes="no"/>
+							</copy>
+						</then>
+						<else>
+							<!-- DEV -->
+							<cvs cvsRoot="${cvs.root}" package="${cvs.module.dev}" dest="${cvs.dir}" tag="${cvs.branche}" command="${cmd.checkout}"/>
+							<antcall target="cleanRecup"/>
+						</else>
+					</if>
+				</then>
+			</if>
+    </else>
+    </if>
+    <record name="${log.dir}/getFromCvs.log" action="stop" />
+  </target>
+
+  <target name="cleanRecup" depends="">
+    <if>
+      <equals arg1="${clean.recup}" arg2="$${clean.recup}" />
+      <then>
+        <input message="Voulez-vous supprimer les répertoires inutiles?" addproperty="clean.recup" validargs="Y,N,P"/>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${clean.recup}" arg2="Y"/>
+      <then>
+        <delete>
+          <fileset dir="${dest.dev}\ael"/>
+          <fileset dir="${dest.dev}\efluidPub"/>
+          <fileset dir="${dest.dev}\efluidNet"/>
+          <fileset dir="${dest.dev}\eFluidNetServer"/>
+          <!-- <fileset dir="${dest.dev}\Hermes\tomcat\hermes\help"/>-->
+          <fileset dir="${dest.dev}\HermesLdap"/>
+          <fileset dir="${dest.dev}\HermesStrS"/>
+        </delete>
+      </then>
+    </if>
+    <if>
+      <equals arg1="${clean.recup}" arg2="P"/>
+      <then>
+        <delete>
+          <!-- <fileset dir="${dest.dev}\Hermes\tomcat\hermes\help"/>-->
+          <fileset dir="${dest.dev}\eFluidNetServer"/>
+          <fileset dir="${dest.dev}\HermesLdap"/>
+          <fileset dir="${dest.dev}\HermesStrS"/>
+        </delete>
+      </then>
+    </if>
+  </target>
+
+
+  <!--
+	*********************************************************************
+  création des zips....
+ 	*********************************************************************
+	-->
+ <target name="makeZip" depends="">
+  	<record name="${log.dir}/makeZip.log" action="start" />
+  	<mkdir dir="${zip.dir}"/>
+  	<if>
+			<equals arg1="${archi.ok}" arg2="Y" />
+   		<then>
+		    <delete file="${zip.archi}"/>
+		    <zip destfile="${zip.archi}" defaultexcludes="no" encoding="iso-8859-1">
+		      <zipfileset dir="${dest.archi}" prefix="" defaultexcludes="no"/>
+		    </zip>
+		  </then>
+		</if>
+    <if>
+			<equals arg1="${dev.ok}" arg2="Y" />
+   		<then>
+    		<delete file="${zip.dev}"/>
+		    <zip destfile="${zip.dev}" defaultexcludes="no" encoding="iso-8859-1">
+			    <zipfileset dir="${dest.dev}" prefix="" defaultexcludes="no"/>
+    		</zip>
+    	</then>
+    </if>
+    <record name="${log.dir}/compil.log" action="stop" />
+ 	</target>
+
+  <target name="modifMap4j" depends="">
+    <if>
+      <equals arg1="${env.version}" arg2="${cvs.tronc}"/>
+      <else>
+        <replace dir="${dest.dev}\hermes\mapping" token="Developpement_dev" value="Developpement_${env.version}" summary="yes" defaultexcludes="no">
+          <include name="**/*.mpj"/>
+        </replace>
+      </else>
+    </if>
+  </target>
+
+	<target name="compilation" depends="">
+ 		<!-- classpath de compilation des sources java -->
+			<path id="project.class.path">
+				<fileset dir="${dest.dev}\hermes\lib">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="${dest.dev}\hermes\scripts\lib">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="I:\ldap">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="I:\oracle\10.2.0.4">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="I:\weblogic\WL81SP5">
+					<include name="**/*.jar"/>
+				</fileset>
+			</path>
+		
+		<delete	dir="${build.dir}"/>
+		<mkdir dir="${build.dir}" />
+
+		<!-- il faut supprimer les classes de test unitaires -->
+		<delete includeEmptyDirs="true" >
+			<fileset dir="${dest.dev}\hermes\src" caseSensitive="yes">
+				<include name="**/test/**/*.*" />
+			</fileset>
+			<fileset dir="${dest.dev}\hermes\src" caseSensitive="yes">
+				<include name="**/jeudetest/**/*.*" />
+			</fileset>
+		</delete>
+		
+		<javac srcdir="${dest.dev}\hermes\src" destdir="${build.dir}" debug="on">
+			<classpath refid="project.class.path"/>
+		</javac>
+		
+		<copy todir="${build.dir}">
+			<fileset dir="${dest.dev}\hermes\src" excludes="**/*.java"/>
+		</copy>
+		<copy todir="${build.dir}">
+			<fileset dir="${dest.dev}\hermes\properties" />
+		</copy>
+
+  </target>
+
+	<target name="make" depends="init">
+		<antcall target="getFromCVS"/>
+		<antcall target="cleanRecup"/>
+		
+		<antcall target="compilation"/>
+    <antcall target="modifMap4j"/>
+    <antcall target="makeZip"/>
+	</target>
+
+
+</project>

@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="taggerListeFichier" default="make" basedir="../.">
+
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+	*********************************************************************
+   Ce sript permet de poser ou de supprimer un label ("tag") sur un ensemble de fichiers ou de répertoires de modules dans CVS
+
+ 	 Ce script appelle le script taggerFichier.xml
+
+   Ce script attend en paramètre :
+
+  	 OBLIGATOIRES
+
+  	 cvs.listeFichier : nom du fichier contenant les fichiers + version à tagger ou à détagger (ex : listefichier.txt)
+
+				exemple de contenu de ce fichier :
+				#
+				# Séparateur des colonnes : ","
+				# Séparateur des lignes : ";"
+				#
+				# Paramètre numéro 1 : T ou U selon que l'on veut poser un Tag ou supprimer un Tag (Untag)
+				#
+				# Paramètre numéro 2 : Nom du tag CVS à poser ou à supprimer (ex : LIV_4_0_31_K_38)
+				#
+				# Paramètre numéro 3 : Nom complet de dossier ou de fichier (ex : Developpement_dev\Hermes\src\uem.xml)
+				#
+				# Paramètre numéro 4 : Version CVS (ex 1.29.2) ou tag CVS (ex : LIV_4_0_31_K_38)
+				#
+				# une ligne peut être mise en commentaire si elle commence par "#"
+				#
+				T,ESSAI_SDE1,Developpement_dev\Hermes\src\uem.xml,1.1;
+				U,ESSAI_SDE1,Developpement_dev\Hermes\src\uem.xml,ESSAI_SDE1;
+
+	 	 FACULTATIFS
+
+  	 cvs.listeFichierDir : répertoire du fichier de liste (ex : scripts)
+
+  	 cvs.login : nom du user pour la connexion à CVS. Par défaut ce
+  	 					paramètre vaut adminDev
+
+  	 cvs.server : nom du serveur sur lequel se trouve la base CVS. Par
+  	 					défaut vaut hermescvs
+
+  	 cvs.repo : nom du repository CVS. Par défaut DEV
+
+  	 etape : etape de démarrage du script. Pas de valeur par défaut
+  	 				(=> on commence donc par la première étape)
+
+  Avant de lancer le script fixer les paramètres d'environnement.
+	La chaîne de lancement est par exemple :
+
+	set JAVA_HOME=D:\Programs\jdk\j2sdk1.4.1
+	set ANT_HOME=D:\Programs\ant\apache-ant-1.6.5
+	set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin
+
+	ant -f taggerListeFichier.xml -Dcvs.tag=LIV_4_0_31_K_02 -Dcvs.listeFichier=listeFichier.txt
+		 [ -Dcvs.login=mrabti_s  -Dcvs.serveur=hermescvs -Dcvs.repo=/DEV -Detape=1 ]
+
+	*********************************************************************
+	-->
+
+
+
+	<!-- Lancement de la tâche unitaire de pose de tag d'un fichier -->
+	<target name="lancementTagUnitaire">
+		
+		<if>
+			<equals arg1="${var.type}" arg2="T"/>
+		<then>
+			<ant antfile="${xmlDir}/taggerFichier.xml">
+				<property name="cvs.tag" value="${var.tag}"/>
+				<property name="cvs.fichier" value="${var.fichier}"/>
+				<property name="cvs.version" value="${var.version}"/>
+				<property name="etape" value="1"/>
+			</ant>
+		</then>
+		</if>
+
+		<if>
+			<equals arg1="${var.type}" arg2="U"/>
+		<then>
+			<ant antfile="${xmlDir}/taggerFichier.xml">
+				<property name="cvs.untag" value="${var.tag}"/>
+				<property name="cvs.fichier" value="${var.fichier}"/>
+				<property name="cvs.version" value="${var.version}"/>
+				<property name="etape" value="1"/>
+			</ant>
+		</then>
+		</if>
+
+	</target>
+
+	<!-- tâche de traitement d'une ligne du fichier -->
+	<target name="splitLigne">
+		
+		<var name="var.id" value="1" />
+
+		<for list="${ligne}" delimiter="," param="data">
+			  <sequential>			    
+				<switch value="${var.id}">
+					<case value="1">
+						<var name="var.type" value="@{data}" />
+						<var name="var.id" value="2" />
+					</case>
+					<case value="2">
+						<var name="var.tag" value="@{data}" />
+						<var name="var.id" value="3" />
+					</case>
+					<case value="3">
+						<var name="var.fichier" value="@{data}" />
+						<var name="var.id" value="4" />
+					</case>
+					<case value="4">
+						<var name="var.version" value="@{data}" />
+						<var name="var.id" value="1" />
+					</case>
+				</switch>
+			  </sequential>
+		</for>
+		
+		<antcall target="lancementTagUnitaire"/>
+
+	</target>
+
+
+  <!-- initialisation -->
+  <target name="init" depends="">
+  
+  	<!-- ExecDir -->
+		<if>
+		<not><isset property="${execDir}"/></not>
+		<then>
+		<property name="execDir" value="${basedir}"/>
+		</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+	  
+		<!-- xmlDir -->
+		<if>
+			<not><isset property="${xmlDir}"/></not>
+		<then>
+			<property name="xmlDir" value="${basedir}/scripts"/>
+		</then>
+		</if>
+		<property name="script.xml.dir" value="${xmlDir}"/>
+
+		<!-- xmlCommunDir -->
+		<if>
+			<not><isset property="${xmlCommunDir}"/></not>
+		<then>
+			<property name="xmlCommunDir" value="${basedir}/scripts"/>
+		</then>
+		</if>
+		<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+	
+		<property name="temp.dir" value="${root}/tmpTagFichier"/>
+
+    <buildnumber file="${root}\build.number"/>
+    <tstamp>
+      <format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+    </tstamp>
+    
+  <property name="log.dir" value="${temp.dir}\log.${build.number}"/>
+  <property name="log.file" value="${log.dir}\taggerListeFichiers.log"/>
+
+   	<!-- creation du répertoire et du fichier de log général -->
+	<mkdir dir="${log.dir}"/>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+			Lancement du script de pose de tag sur une liste de fichiers
+		*********************************************************************
+		</echo>
+	<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+	<if>
+		<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+	<then>
+		<property name="property.file.dir" value="scripts"/>
+	</then>
+	</if>
+	<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+	<if>
+		<equals arg1="${property.file.present}" arg2="true" />
+		<then>
+			<echo file="${log.file}" append="true">
+	Utilisation du fichier ${property.file}
+			</echo>
+			<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+		Pas de fichier de propriétés dans ${root}\${property.file.dir}
+			</echo>
+		</else>
+	</if>
+
+		<!-- Chaîne de connexion à la base CVS -->
+		<if>
+			<not><isset property="${cvs.login}"/></not>
+			<then>
+				<property name="cvs.login" value="adminDev"/>
+			</then>
+		</if>
+		<if>
+			<not><isset property="${cvs.repo}"/></not>
+			<then>
+				<property name="cvs.repo" value="/DEV"/>
+			</then>
+		</if>
+		<if>
+			<not><isset property="${cvs.server}"/></not>
+			<then>
+				<property name="cvs.server" value="hermescvs"/>
+			</then>
+		</if>
+
+		<if>
+			<not><isset property="${cvs.listeFichierDir}"/></not>
+			<then>
+				<property name="cvs.listeFichierDir" value="scripts"/>
+			</then>
+		</if>
+
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+		<!-- Verification des paramètres obligatoires -->
+		<if>
+				<equals arg1="${cvs.listeFichier}" arg2="$${cvs.listeFichier}" />
+			<then>
+				<echo>
+			cvs.listeFichier="${cvs.listeFichier}"
+				</echo>
+				<fail message="il manque un ou plusieurs paramètres obligatoires (Cf. ci-dessus)"/>
+			</then>
+			<else>
+			</else>
+		</if>
+
+		<echo file="${log.file}" append="true">
+			Chaine de connexion à CVS : ${cvs.root}
+			cvs.listeFichier="${cvs.listeFichier}"
+		</echo>
+
+
+  </target>
+
+
+	<!--
+	*********************************************************************
+	Lancement des poses de tag (iteration sur la liste)
+	*********************************************************************
+	-->
+	<target name="listeFichiers" depends="init">
+
+		<loadfile property="listFichiers" srcFile="${cvs.listeFichierDir}/${cvs.listeFichier}">
+			<filterchain>
+				<!-- l'ordre des éléments du filtre est très IMPORTANT -->
+				<striplinecomments>
+					<comment value="#"/>
+				</striplinecomments>
+				<striplinebreaks/>
+			</filterchain>
+		</loadfile>
+
+		<foreach list="${listFichiers}" target="splitLigne" delimiter=";" param="ligne" inheritall="true"/>
+
+	</target>
+
+	<!--
+	*********************************************************************
+		Lancement
+	*********************************************************************
+	-->
+	<target name="make">
+		<antcall target="listeFichiers"/>
+	</target>
+
+</project>

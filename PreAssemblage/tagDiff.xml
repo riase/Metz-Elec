@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="tagDiff" default="make" basedir=".">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!--
+	*********************************************************************
+	Ce script permet de générer un report de diff entre 2 versions des sources.
+	*********************************************************************
+	-->
+
+	<!--
+	*********************************************************************
+		Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+		<property name="livrable.properties" value="livrable.properties" />
+		<available file="${livrable.properties}" property="livrable.properties.present" />
+		<if>
+			<equals arg1="${livrable.properties.present}" arg2="true" />
+			<then>
+				<echo message="tagDiff - Utilisation du fichier ${basedir}/${livrable.properties}" />
+				<loadproperties srcFile="${livrable.properties}" />
+			</then>
+			<else>
+				<echo message="tagDiff - Pas de fichier de propriétés ${livrable.properties} dans ${basedir}" />
+			</else>
+		</if>
+		
+		<property name="composants.properties" value="composants.properties" />
+		<available file="${composants.properties}" property="composants.properties.present" />
+		<if>
+			<equals arg1="${composants.properties.present}" arg2="true" />
+			<then>
+				<echo message="tagDiff - Utilisation du fichier ${basedir}/${composants.properties}" />
+				<loadproperties srcFile="${composants.properties}" />
+			</then>
+			<else>
+				<echo message="tagDiff - Pas de fichier de propriétés ${composants.properties} dans ${basedir}" />
+			</else>
+		</if>
+
+		<!-- Verification des paramètres obligatoires -->
+		<if>
+			<or>
+				<equals arg1="${nomLivrableFormate}" arg2="$${nomLivrableFormate}" />
+				<equals arg1="${tagVersionCible}" arg2="$${tagVersionCible}" />
+				<equals arg1="${tagVersionSource}" arg2="$${tagVersionSource}" />
+				<equals arg1="${codeApplication}" arg2="$${codeApplication}" />
+				<equals arg1="${moduleCVSDir}" arg2="$${moduleCVSDir}" />				
+				<equals arg1="${CVS_HOST}" arg2="$${CVS_HOST}" />
+				<equals arg1="${CVS_PORT}" arg2="$${CVS_PORT}" />
+				<equals arg1="${CVS_REPO}" arg2="$${CVS_REPO}" />
+				<equals arg1="${CVS_LOGIN}" arg2="$${CVS_LOGIN}" />
+				<equals arg1="${CVS_PWD}" arg2="$${CVS_PWD}" />
+			</or>
+			<then>
+				<fail message="tagDiff - il manque un ou plusieurs parametres obligatoires"/>
+			</then>
+		</if>
+
+		<!-- on recupère les fichiers dont le script à besoin -->
+		<property environment="env"/>
+		<copy file="${env.MODE_TRAITEMENT_HOME}/TraitementUnitaire/zip.xml" todir="${basedir}" />
+
+		<property name="temp.dir" value="${basedir}/tmp" />
+		<property name="log.dir" value="${temp.dir}/log"/>
+		<property name="log.file" value="${log.dir}/zipChekoutCVS.log"/>
+		<mkdir dir="${log.dir}"/>
+
+		<!-- propriétés calculées -->
+		<property name="CVS_ROOT" value=":pserver:${CVS_LOGIN}:${CVS_PWD}@${CVS_HOST}:${CVS_PORT}:${CVS_REPO}"/>
+		<property name="fichierOut" value="${nomLivrableFormate}_${codeApplication}_${tagVersionSource}_${tagVersionCible}"/>
+		<if>
+			<equals arg1="${sourceDir}" arg2="$${sourceDir}"/>
+		<then>
+			<property name="cvs.source" value="${moduleCVSDir}/${sourceDir}"/>
+		</then>
+		<else>
+			<property name="cvs.source" value="${moduleCVSDir}"/>
+		</else>
+		</if>
+
+		<echo file="${log.file}" append="true">
+*********************************************************************
+	Lancement du script de création des différences CVS
+*********************************************************************
+	Les sources CVS proviennent de : ${cvs.source}
+	en version 1 :	${tagVersionSource}
+	en version 2 :	${tagVersionCible}
+	Fichier de sortie :	${fichierOut}.html
+		</echo>
+
+	</target>
+
+	<target name="diffTag" depends="init">
+		<echo file="${log.file}" append="true">
+Création du fichier xml : ${temp.dir}/${fichierOut}.xml
+		</echo>
+		<cvstagdiff cvsRoot="${CVS_ROOT}" 
+					package="${cvs.source}" 
+					destfile="${temp.dir}/${fichierOut}.xml" 
+					startTag="${tagVersionSource}" 
+					endTag="${tagVersionCible}"/>
+		
+		<echo file="${log.file}" append="true">
+Création du fichier txt : ${temp.dir}/${fichierOut}.txt
+		</echo>
+		<cvs cvsRoot="${CVS_ROOT}" 
+			 package="${cvs.source}" 
+			 command="rdiff -s -r ${tagVersionSource} -r ${tagVersionCible}" 
+			 output="${temp.dir}/${fichierOut}.txt" />
+
+		<echo file="${log.file}" append="true">
+Création du fichier HTML : ${basedir}/${fichierOut}.html
+		</echo>
+		<style in="${temp.dir}/${fichierOut}.xml" out="${temp.dir}/${fichierOut}.html" style="${ant.home}/etc/tagdiff.xsl">
+			<param name="title" expression="Différences sur le module ${cvs.source}"/>
+			<param name="module" expression="${cvs.source}"/>
+			<param name="cvsweb" expression="D:\\java\\projets\\"/>
+		</style>
+	</target>
+	
+	<target name="zip" depends="diffTag">
+		<zip destfile="diff_${nomLivrableFormate}_${tagVersionSource}_${tagVersionCible}.zip"> 
+        	<zipfileset dir="${temp.dir}" includes="${fichierOut}.*" />
+        </zip>	
+	</target>
+
+	<target name="make">
+		<antcall target="zip"/>
+	</target>
+</project>

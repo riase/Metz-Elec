@@ -1,0 +1,457 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="assemblageEjbProxy" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!-- Ajout d'un package pour utiliser le task XML -->
+	<taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"/>
+
+	<!-- *********************************************************************
+	Ce script permet de packager l'EJB Proxy d'efluid.
+
+		etape 1 : récupération des sources CVS
+		etape 2 : properties
+		etape 3 : ejb
+		etape 4 : ear
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+	cvs.module 	: nom COMPLET du module CVS à récupérer
+	cvs.tag 		: version du module à récupérer. Si la valeur vaut LAST alors c'est la dernière version (non étiquetée) qui est	récupérée
+	context 		: nom du contexte de déploiement de l'application (= sous répertoire du paramétrage)
+
+	OPTIONNELS
+	etape 					: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+	debug 					: "Y" pour déployer l'application en mode debug
+	
+	cvs.login				: login pour se connecter à CVS. Par défaut adminDEV
+	cvs.server			: serveur hébergeant la base CVS. Par défaut lausanne
+	cvs.repo				: repository où sont les sources. Par défaut /DEV
+	Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+	property.file		: fichier avec toutes les properties de lancement du script. Prend le dessus sur les paramètres passé par la ligne de commande (sauf le paramètre contexte)
+	property.file.dir : répertoire où se trouve property.file. Par défaut, ${root}\scripts
+	
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f assemblageEjbProxy.xml -Dcvs.module=Developpement_dev/efluidProxy -Dcvs.tag=LAST -Dcontext=INT209
+		 [-Detape=3 -Ddebug=Y -Djavadoc=Y ]
+	ou
+	ant -f assemblageEjbProxy.xml -Dproperty.file=integrationProxy.properties
+
+	*********************************************************************
+	-->
+
+	<target name="getLASTFromCVS">
+		<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}" quiet="yes" dest="${cvs.dir}"/>
+		<echo file="${log.file}" append="true">
+			La dernière version de l'application ${cvs.module} a été récupérée
+		</echo>
+	</target>
+	
+	<target name="getThisTagFromCVS">
+		<property name="curTag" value="${item}"/>
+		<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+	
+		<move todir="${cvs.dir}" overwrite="true">
+			<fileset dir="${checkout.dir}" />
+		</move>
+		<delete dir="${checkout.dir}"/>
+
+<echo file="${log.file}" append="true">
+	La version ${curTag} de l'application ${cvs.module} a été récupérée
+</echo>
+	</target>
+
+	<!--
+	*********************************************************************
+	Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+		<!-- propriétés pour le déroulement des étapes du script -->
+		<property name="etapeAutorisee" value="Y"/>
+		<property name="etapeNonAutorisee" value="N"/>
+		
+		<!-- ExecDir -->
+		<if>
+			<not><isset property="${execDir}"/></not>
+		<then><property name="execDir" value="${basedir}"/></then>
+		</if>
+		<property name="root" value="${execDir}"/>
+
+		<property name="script.xml.dir" value="${basedir}/j2ee"/>
+		<property name="temp.dir" value="${root}/tmp"/>
+		<property name="cvs.dir" value="${temp.dir}/projet"/>
+		<property name="projet.dir" value="${cvs.dir}"/>
+		<property name="checkout.dir" value="${temp.dir}/checkout"/>
+
+		<!-- Indentifiant de l'exéction -->
+		<buildnumber file="${root}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+		<!-- Le répertoire de log et le fichier log du script (spécifique à chaque exécution pour garder un historique) -->
+		<property name="log.dir" value="${temp.dir}/log/application/${context}.${build.number}"/>
+		<property name="log.file" value="${log.dir}/assemblageefluidProxy.log"/>
+		<property name="properties.dir" value="${temp.dir}/properties"/>
+		
+		<!-- creation du répertoire et du fichier de log général -->
+		<delete dir="${log.dir}"/>
+		<mkdir dir="${log.dir}"/>
+
+<echo file="${log.file}" append="true">
+*********************************************************************
+	Lancement du script d'assemblage efluid Proxy
+*********************************************************************
+</echo>
+
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<if>
+			<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+		<then><property name="property.file.dir" value="scripts"/></then>
+		</if>
+		<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+		<if>
+			<equals arg1="${property.file.present}" arg2="true" />
+			<then>
+<echo file="${log.file}" append="true">
+	Utilisation du fichier ${property.file}
+</echo>
+				<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+			</then>
+			<else>
+<echo file="${log.file}" append="true">
+	Pas de fichier de propriétés dans ${root}\${property.file.dir}
+</echo>
+			</else>
+		</if>
+
+		<property name="exported.dir" value="${root}/application/${context}"/>
+		<property name="resources.dir" value="${root}/parametrage"/>
+		<property name="parametrage.dir" value="${resources.dir}/application/${context}"/>
+
+		<property name="ejb.dir" value="${parametrage.dir}"/>
+		<property name="businessController" value="${ejb.dir}/businessControllerProxy.jar"/>
+		<property name="ejb.properties.dir" value="${projet.dir}/${cvs.module}/ejb/CMT/META-INF"/>
+
+		<!-- connexion à CVS -->
+		<if>
+			<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+			<then><property name="cvs.login" value="adminDEV"/></then>
+		</if>
+		<if>
+			<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+			<then><property name="cvs.server" value="hermescvs"/></then>
+		</if>
+		<if>
+			<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+			<then><property name="cvs.repo" value="/DEV"/></then>
+		</if>
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+		<property name="lib.dir" value="${projet.dir}/${lib.module}"/>
+		<property name="sourceproperties.dir" value="${projet.dir}/${cvs.module}/${srcproperties.dir}"/>
+
+<echo file="${log.file}" append="true">
+	Parametres de lancement :
+		etape = ${etape}
+		connexion à CVS = ${cvs.root}
+		application = ${application}
+		context = ${context}
+		lib.module = ${lib.module}
+		cvs.module = ${cvs.module}
+		cvs.tag = ${cvs.tag}
+		debug = ${debug}
+</echo>
+
+		<!-- Debug -->
+		<if>
+			<equals arg1="${debug}" arg2="Y"/>
+			<then>
+				<property name="FrameworkJar" value="frameworkDebug.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterpriseDebug.jar"/>
+				<property name="HermesArchiJar" value="HermesArchiDebug.jar"/>
+				<property name="EDKJar" value="efluidEDKDebug.jar"/>
+			</then>
+			<else>
+				<property name="FrameworkJar" value="framework.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterprise.jar"/>
+				<property name="HermesArchiJar" value="HermesArchi.jar"/>
+				<property name="EDKJar" value="efluidEDK.jar"/>
+			</else>
+		</if>
+		
+		
+		<property environment="env"/>
+		<echo> env.JAVA_HOME = ${env.JAVA_HOME}</echo>
+	
+		<if>
+			<or>
+				<equals arg1="${jdk.version}" arg2="" />
+				<equals arg1="${jdk.version}" arg2="1.4" />
+			</or>
+			<then>
+				<property name="jdk.home" value="${env.JAVA_HOME}"/>
+				<property name="framework.home" value="${lib.dir}/hermesArchi/lib"/>
+				<property name="hermesArchi.home" value="${lib.dir}/hermesArchi/lib"/>
+				<property name="efluidEDK.home" value="${lib.dir}/efluidEDK/lib"/>
+			</then>
+			<else>
+				<property name="framework.home" value="${lib.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="hermesArchi.home" value="${lib.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="efluidEDK.home" value="${lib.dir}/efluidEDK/lib${jdk.version}"/>
+			</else> 
+		</if>
+		
+		<if>
+			<equals arg1="${classPath.specifique}" arg2="$${classPath.specifique}" />
+			<then>
+				<property name="ClassPath_EJB" value="./properties ${HermesArchiJar} ${EDKJar}"/>
+			</then>
+			<else>
+				<property name="ClassPath_EJB" value="./properties ${HermesArchiJar} ${EDKJar} ${classPath.specifique}"/>
+			</else>
+		</if>
+		
+
+		
+<echo file="${log.file}" append="true">
+	framework.home = ${framework.home}
+	hermesArchi.home = ${hermesArchi.home}
+</echo>
+
+		<!-- répertoir des librairies spécifiques à inclure-->
+		<delete dir="${temp.dir}/tmplibSpecifiques"/>
+		<mkdir dir="${temp.dir}/tmplibSpecifiques"/>
+
+		<property name="librairies.ear.temp" value="${temp.dir}/tmplibSpecifiques"/>
+		<copy todir="${librairies.ear.temp}"  overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques.ear}"/>
+		</copy>
+
+<echo file="${log.file}" append="true">
+	librairies.specifiques.dir = ${temp.dir}/tmplibSpecifique
+	librairies.specifiques.ear = ${librairies.specifiques.ear}
+	librairies.ear.temp = ${librairies.ear.temp}
+</echo>
+
+	<!--Etapes du scripts. A executer dans l'ordre -->
+	<switch value="${etape}">
+		<case value="2">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="3">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="4">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+		</case>
+		<default>
+		</default>
+	</switch>
+	<!--
+	les property qui n'auraient pas été valuées précédemment le sont à présent.
+	La valeur mise fait en sorte que l'étape est autorisée.
+	-->
+	<property name="etape1" value="${etapeAutorisee}"/>
+	<property name="etape2" value="${etapeAutorisee}"/>
+	<property name="etape3" value="${etapeAutorisee}"/>
+	<property name="etape4" value="${etapeAutorisee}"/>
+
+	</target>
+
+
+	<!-- 
+	*********************************************************************
+				ETAPE 1 : Récupération du source de CVS
+	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="init">
+<echo file="${log.file}" append="true">
+*********************************************************************
+	ETAPE 1 : Récupération du source de CVS
+*********************************************************************
+</echo>
+		<if>
+			<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+		<then>
+			<delete	dir="${cvs.dir}"/>
+			<mkdir	dir="${cvs.dir}"/>
+			<delete	dir="${checkout.dir}"/>
+
+			<if>
+				<equals arg1="${cvs.tag}" arg2="LAST" />
+			<then>
+				<antcall target="getLASTFromCVS"/>
+			</then>
+			<else>
+				<foreach list="${cvs.tag}" target="getThisTagFromCVS" delimiter="+" param="item" inheritall="true"/>
+			</else>
+			</if>
+		</then>
+		<else>
+<echo file="${log.file}" append="true">
+	les sources de l'application ${cvs.module} n'ont pas été récupérées
+</echo>
+		</else>
+		</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 2 : Récuperation des properties.
+	********************************************************************
+	-->
+	<target name="properties" depends="getFromCVS">
+<echo file="${log.file}" append="true">
+*********************************************************************
+	ETAPE 2 : Récuperation des properties.
+*********************************************************************
+</echo>
+	<if>
+		<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+		<then>
+			<delete dir="${properties.dir}"/>
+			<mkdir dir="${properties.dir}"/>
+
+			<copy todir="${properties.dir}">
+				<fileset dir="${sourceproperties.dir}" />
+			</copy>
+			
+<echo file="${log.file}" append="true">
+	OK
+</echo>
+		</then>
+		<else>
+<echo file="${log.file}" append="true">
+	Les properties n'ont pas été copiés
+</echo>
+		</else>
+	</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 3 : Packaging de l'EJB du controleur métier du framework
+
+	Le fichier ${app-server}-ejb-jar.xml est remplacé dans le jar par la version
+	qui se trouve dans le répertoire de paramétrage (nom JNDI de l'EJB)
+	*********************************************************************
+	-->	
+	<target name="makeEjb" depends="properties">
+<echo file="${log.file}" append="true">
+*********************************************************************
+	ETAPE 3 : Packaging de l'EJB du controleur métier du framework.
+*********************************************************************
+</echo>
+	<if>
+		<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+		<then>
+
+			<!-- mise à jour du manifest de l'EJB -->
+			<!-- on ne surcharge pas le classpath car on utilise APP-INF -->
+			<manifest file="${log.dir}/EJB_MANIFEST.MF">
+				<attribute name="Built-By" value="${user.name}"/>
+				<attribute name="Built-Date" value='${TODAY_UK}'/>
+			</manifest>
+
+			<!-- copie de tous les fichies de déploiement -->
+			<jar jarFile="${businessController}" update="true" manifest="${log.dir}/EJB_MANIFEST.MF">
+				<zipfileset dir="${ejb.properties.dir}" prefix="META-INF/" includes="**/*.xml,**/*.xmi" />
+				<zipfileset dir="${parametrage.dir}" prefix="META-INF/" includes="weblogic-ejb-jar.xml"/>
+			</jar>
+
+<echo file="${log.file}" append="true">
+	OK
+</echo>
+
+		</then>
+		<else>
+
+<echo file="${log.file}">
+	Le fichier EJB n'a pas été packagé
+</echo>
+
+		</else>
+	</if>
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 4 : Création de l'EAR
+	*********************************************************************
+	-->
+	<target name="makeEar" depends="makeEjb">
+<echo file="${log.file}" append="true">
+*********************************************************************
+	ETAPE 4 : Création de l'EAR
+*********************************************************************
+</echo>
+		<if>
+			<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+			<then>
+
+				<trycatch>
+					<try>
+						<mkdir dir="${exported.dir}"/>
+					</try>
+					<catch>
+						<echo file="${log.file}" append="true">
+						Le répertoire ${exported.dir} existe déjà
+						</echo>
+					</catch>
+				</trycatch>
+
+				<manifest file="${log.dir}\MANIFEST.MF">
+					<attribute name="Created-By" value="Java ${jdk.version}" />
+					<attribute name="Built-By" value="${user.name}"/>
+					<attribute name="Built-Date" value='${TODAY_UK}'/>
+					<section name="com/hermes/ref/acteur/businessobject/">
+						<attribute name="Specification-Title" value="efluid Proxy" />
+						<attribute name="Specification-Version" value="${cvs.tag}" />
+						<attribute name="Specification-Vendor" value="CGI France - UEM" />
+						<attribute name="Implementation-Title" value="efluid Proxy" />
+						<attribute name="Implementation-Version" value="${cvs.tag}.${build.number}" />
+						<attribute name="Implementation-Vendor" value="CGI France - UEM" />
+					</section>
+				</manifest>
+
+				<ear earfile="${exported.dir}/${context}.ear" appxml="${parametrage.dir}/application.xml" manifest="${log.dir}/MANIFEST.MF">
+					<zipfileset dir="${ejb.dir}" includes="businessControllerProxy.jar"/>
+					<zipfileset dir="${properties.dir}" prefix="APP-INF/classes" includes="**/*.properties"/>
+
+					<zipfileset dir="${librairies.ear.temp}" prefix="APP-INF/lib" includes="*.jar"/>
+					<zipfileset dir="${hermesArchi.home}" prefix="APP-INF/lib" includes="${HermesArchiJar}"/>
+					<zipfileset dir="${framework.home}" prefix="APP-INF/lib" includes="${FrameworkJar}, ${FrameworkEnterpriseJar}"/>
+					<zipfileset dir="${efluidEDK.home}" prefix="APP-INF/lib" includes="${EDKJar}"/>
+				</ear>
+
+<echo file="${log.file}" append="true">
+		OK
+</echo>
+			</then>
+			<else>
+<echo file="${log.file}" append="true">
+		Le fichier EAR n'a pas été créé
+</echo>
+			</else>
+		</if>
+	</target>
+
+
+	<target name="make">
+		<antcall target="makeEar"/>
+	</target>
+
+</project>

@@ -1,0 +1,1172 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="assemblageAppliWeb" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!-- Ajout d'un package pour utiliser le task XML -->
+	<taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"/>
+
+	<!-- *********************************************************************
+	Ce script permet de packager une application Web (WAR)
+
+		etape 1 : récupération des sources CVS
+		etape 2 : compilation
+		etape 3 : properties
+		etape 4 : Aar
+		etape 5 : Jar
+		etape 6: test compilation JSP
+		etape 7 : war
+
+	Avant de lancer le script fixer les paramètres d'environnement (Cf. setEnv.cmd)
+
+		set JAVA_HOME=D:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+		set ANT_OPTS=-Xmx512M
+
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+	cvs.module 	: nom COMPLET du module CVS à récupérer
+	cvs.tag 		: version du module à récupérer. Si la valeur vaut LAST
+									alors c'est la dernière version (non étiquetée) qui est	récupérée
+	context 		: nom du contexte de déploiement de l'application. Valeur par défaut : hermes
+
+	OPTIONNELS
+	etape 					: etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+	debug 					: "Y" pour déployer l'application en mode debug
+	testCompilJSP		: Y pour tester la compilation des JSP, N sinon. Y par défaut.
+	objetsMetier		: Y pour incorporer le jar des objets métier d'efluid, N sinon. N par défaut.
+	librairies.specifiques	: liste des jar à inclure dans le war
+	
+	cvs.login				: login pour se connecter à CVS. Par défaut adminDEV
+	cvs.server			: serveur hébergeant la base CVS. Par défaut lausanne
+	cvs.repo				: repository où sont les sources. Par défaut /DEV
+	Ces trois paramètres peuvent être remplacé par un paramètre global (cvs.root=:pserver:${cvs.login}@${cvs.server}:${cvs.repo})
+
+	property.file		: fichier avec toutes les properties de lancement du script. Prend le dessus sur les paramètres passé par la ligne de commande (sauf le paramètre contexte)
+	property.file.dir : répertoire où se trouve property.file. Par défaut, ${root}\scripts
+	
+	srcweb.dir				: répertoire relatif où sont les fichiers source web. Par défaut : tomcat/hermes
+	srcjava.dir				: répertoire relatif où sont les fichiers source java. Par défaut : src
+	srcproperties.dir	: répertoire relatif où sont les fichiers properties. Par défaut : src
+	srctest.dir				: répertoire relatif où sont les fichiers de test java. Par défaut : src
+	srcxml.dir				: répertoire relatif où sont les fichiers xml. Par défaut : xml
+	
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f assemblageAppliWeb.xml -Dcvs.module=Developpement_dev/Hermes -Dcvs.tag=LAST -Dcontext=INT209
+		 [-Detape=3 -Ddebug=Y -Djavadoc=Y ]
+
+ou
+
+	ant -f assemblageAppliWeb.xml -Dproperty.file=integrationAppli.txt
+
+	Pour que le script fonctionne, le répertoire de paramétrage (${parametrage.dir})
+	doit contenir les ressources suivantes :
+
+	fichiers properties :
+			framework2.properties
+			hermes2.properties	
+			edk2.properties (optionnel)
+			application_fr.properties (optionnel)
+
+	fichiers xml
+			application.xml
+			societe.xml (optionnel)
+
+	ressources Web
+		logoEfluid.gif (optionnel)
+
+	*********************************************************************
+	-->
+
+	<target name="getLASTFromCVS">
+		<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/src" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcxml.dir}" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/properties" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcweb.dir}" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/lib" quiet="yes" dest="${cvs.dir}"/>
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/scripts" quiet="yes" dest="${cvs.dir}"/>
+		<echo file="${log.file}" append="true">
+			La dernière version de l'application ${cvs.module} a été récupérée
+		</echo>
+	</target>
+	
+	<target name="getThisTagFromCVS">
+		<property name="curTag" value="${item}"/>
+		<cvs cvsRoot="${cvs.root}" package="${lib.module}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/src" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcxml.dir}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/properties" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/${srcweb.dir}" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/lib" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+		<cvs cvsRoot="${cvs.root}" package="${cvs.module}/scripts" quiet="yes" dest="${checkout.dir}" tag="${curTag}" />
+	
+		<move todir="${cvs.dir}" overwrite="true">
+			<fileset dir="${checkout.dir}" />
+		</move>
+		<delete dir="${checkout.dir}"/>
+
+		<echo file="${log.file}" append="true">
+			La version ${curTag} de l'application ${cvs.module} a été récupérée
+		</echo>
+	</target>
+
+	<target name="moveFichierSocieteXML">
+	<!-- le fichier xml est éventuellement spécifique à l'environnement cible -->
+		<available file="${build.dir}/${societe}.xml" property="present" />
+		<if>
+			<equals arg1="${present}" arg2="true" />
+			<then>
+				<move file="${build.dir}/${societe}.xml" todir="${properties.dir}" overwrite="true" />
+				<echo file="${log.file}" append="true">
+					${societe}.xml a été copié
+				</echo>
+			</then>
+		</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+		<!-- ExecDir -->
+		<if>
+			<not><isset property="${execDir}"/></not>
+		<then>
+				<property name="execDir" value="${basedir}"/>
+		</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+
+
+		<property name="script.xml.dir" value="${basedir}/j2ee"/>
+		<property name="squelettes.dir" value="${script.xml.dir}/squelettes"/>
+
+		<property name="temp.dir" value="${root}/tmp"/>
+		<property name="cvs.dir" value="${temp.dir}/projet"/>
+		<property name="projet.dir" value="${cvs.dir}"/>
+		<property name="checkout.dir" value="${temp.dir}/checkout"/>
+
+		<!-- Indentifiant de l'exéction -->
+		<buildnumber file="${root}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+		<!-- Le répertoire de log et le fichier log du script (spécifique à chaque exécution pour garder un historique) -->
+		<property name="log.dir" value="${temp.dir}/log/application/${context}.${build.number}"/>
+		<property name="log.file" value="${log.dir}/assemblageJ2EE.log"/>
+		<property name="properties.dir" value="${temp.dir}/log/properties"/>
+		
+		<!-- creation du répertoire et du fichier de log général -->
+		<delete dir="${log.dir}"/>
+		<mkdir dir="${log.dir}"/>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+		Lancement du script d'assemblage Web
+		*********************************************************************
+		</echo>
+
+		<property name="resources.dir" value="${root}/parametrage"/>
+		<property name="parametrage.dir" value="${resources.dir}/application/${context}"/>
+
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<if>
+			<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+		<then>
+			<property name="property.file.dir" value="scripts"/>
+		</then>
+		</if>
+		<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+		<if>
+			<equals arg1="${property.file.present}" arg2="true" />
+			<then>
+				<echo file="${log.file}" append="true">
+		Utilisation du fichier ${property.file}
+				</echo>
+				<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+			</then>
+			<else>
+				<echo file="${log.file}" append="true">
+			Pas de fichier de propriétés dans ${root}\${property.file.dir}
+				</echo>
+			</else>
+		</if>
+
+		<!-- récuperation du paramétrage XML spécifique à la PF-->
+		<available file="${parametrage.dir}/parametrageXML.properties" property="parametrageXML.present" />
+		<echo file="${log.file}" append="true">
+			parametrageXML.present : ${parametrageXML.present}
+		</echo>
+		<if>
+			<equals arg1="${parametrageXML.present}" arg2="true" />
+			<then>
+				<loadproperties srcFile="${parametrage.dir}/parametrageXML.properties"/>
+			</then>
+		</if>
+
+		<!-- la JavaDoc -->
+		<property name="javadoc.dir" value="${root}/documentation/javadoc/api"/>
+
+		<!-- propriétés pour le déroulement des étapes du script -->
+		<property name="oui" value="Y"/>
+		<property name="non" value="N"/>
+		<property name="etapeAutorisee" value="${oui}"/>
+		<property name="etapeNonAutorisee" value="${non}"/>
+		
+		<!--
+		*********************************************************************
+		le résultat du script se trouve dans le répertoire exported.dir.
+		Il s'agit de : un jar, un war, un ear
+		Le nom des fichiers dépend de la propriété "context"
+
+		Seul le fichier ear doit être déployé
+		*******************************************************************
+		-->
+		<property name="exported.dir" value="${root}/application/${context}"/>
+		<echo>context = ${context} </echo>
+		<!-- les ressources particulières -->
+		<property name="app_jar" value="${context}.jar"/>
+		<property name="app_war" value="${context}.war"/>
+		<property name="help_zip" value="${context}Help.zip"/>
+	
+		<!-- connexion à CVS -->
+		<if>
+			<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+			<then>
+				<property name="cvs.login" value="adminDEV"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+			<then>
+				<property name="cvs.server" value="hermescvs"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+			<then>
+				<property name="cvs.repo" value="/DEV"/>
+			</then>
+		</if>
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+		<!-- compilation des JSP -->
+		<if>
+			<equals arg1="${testCompilJSP}" arg2="$${testCompilJSP}" />
+			<then>
+				<property name="testCompilJSP" value="${oui}"/>
+			</then>
+		</if>
+
+		<!-- objets métier efluid -->
+		<if>
+			<equals arg1="${objetsMetier}" arg2="$${objetsMetier}" />
+			<then>
+				<property name="objetsMetier" value="${non}"/>
+			</then>
+		</if>
+<echo> objetsMetier = ${objetsMetier}</echo>
+		<!-- creer le zip de l'aide en ligne -->
+		<if>
+			<equals arg1="${zipHelp}" arg2="$${zipHelp}" />
+			<then>
+				<property name="zipHelp" value="${non}"/>
+			</then>
+		</if>
+
+		<!-- répertoires fichiers source -->
+		<if>
+			<equals arg1="${srcjava.dir}" arg2="$${srcjava.dir}" />
+			<then>
+				<property name="srcjava.dir" value="src"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${srctest.dir}" arg2="$${srctest.dir}" />
+			<then>
+				<property name="srctest.dir" value="src"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${srcproperties.dir}" arg2="$${srcproperties.dir}" />
+			<then>
+				<property name="srcproperties.dir" value="src"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${srcweb.dir}" arg2="$${srcweb.dir}" />
+			<then>
+				<property name="srcweb.dir" value="tomcat/hermes"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${srcxml.dir}" arg2="$${srcxml.dir}" />
+			<then>
+				<property name="srcxml.dir" value="xml"/>
+			</then>
+		</if>
+		<property name="lib.dir" value="${projet.dir}/${cvs.module}/lib"/>
+		<property name="librairies.dir" value="${projet.dir}/${lib.module}"/>
+		<property name="sourcejava.dir" value="${projet.dir}/${cvs.module}/${srcjava.dir}"/>
+		<property name="sourceproperties.dir" value="${projet.dir}/${cvs.module}/${srcproperties.dir}"/>
+		<property name="xml.dir" value="${projet.dir}/${cvs.module}/${srcxml.dir}"/>
+		<property name="web.dir" value="${projet.dir}/${cvs.module}/${srcweb.dir}"/>
+		<property name="build.dir" value="${projet.dir}/${cvs.module}/classes"/>
+		<property name="help.dir" value="${projet.dir}/${cvs.module}/${srchelp.dir}"/>
+
+
+		<echo file="${log.file}" append="true">
+		Parametres de lancement :
+			etape = ${etape}
+			context = ${context}
+			cvs.module = ${cvs.module}
+			cvs.tag = ${cvs.tag}
+			debug = ${debug}
+			javadoc = ${javadoc}
+			connexion à CVS = ${cvs.root}
+			testCompilJSP = ${testCompilJSP}
+			objetsMetier = ${objetsMetier}
+			societes = ${societes}
+			
+		Nom du jar : ${app_jar}
+		</echo>
+
+		<!-- librairies à inclure -->
+		<if>
+			<not><isset property="${librairies.specifiques}"/></not>
+			<then>
+				<property name="librairies.specifiques" value="${none}"/>
+			</then>
+		</if>
+		
+		<echo file="${log.file}" append="true">
+			librairies.specifiques = ${librairies.specifiques}
+		</echo>
+
+		<!-- Debug -->
+		<if>
+			<not><isset property="${debug}"/></not>
+			<then>
+				<property name="debug" value="${non}"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${debug}" arg2="${oui}"/>
+			<then>
+				<property name="FrameworkJar" value="frameworkDebug.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterpriseDebug.jar"/>
+				<property name="HermesArchiJar" value="HermesArchiDebug.jar"/>
+				<property name="efluidEDKJar" value="efluidEDKDebug.jar"/>
+			</then>
+			<else>
+				<property name="FrameworkJar" value="framework.jar"/>
+				<property name="FrameworkEnterpriseJar" value="frameworkEnterprise.jar"/>
+				<property name="HermesArchiJar" value="HermesArchi.jar"/>
+				<property name="efluidEDKJar" value="efluidEDK.jar"/>
+			</else>
+		</if>
+		
+		
+		
+		<property environment="env"/>
+		
+		<echo> env.JAVA_HOME = ${env.JAVA_HOME}</echo>
+	
+		<if>
+			<or>
+				<equals arg1="${jdk.version}" arg2="" />
+				<equals arg1="${jdk.version}" arg2="1.4" />
+			</or>
+			<then>
+				<property name="jdk.home" value="${env.JAVA_HOME}"/>
+				<property name="framework.home" value="${librairies.dir}/hermesArchi/lib"/>
+				<property name="hermesArchi.home" value="${librairies.dir}/hermesArchi/lib"/>
+				<property name="efluidEDK.home" value="${librairies.dir}/efluidEDK/lib"/>
+				<property name="script.lib.Jar" value="saaj.jar, jaxrpc.jar, axis.jar, commons-discovery.jar, commons-logging.jar, log4j.jar"/>
+			</then>
+			<else>
+				<property name="framework.home" value="${librairies.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="hermesArchi.home" value="${librairies.dir}/hermesArchi/lib${jdk.version}"/>
+				<property name="efluidEDK.home" value="${librairies.dir}/efluidEDK/lib${jdk.version}"/>
+			</else> 
+		</if>
+		
+		
+<echo>- JAVA_HOME = ${jdk.home}</echo>
+<echo>- efluidEDK.home = ${efluidEDK.home}</echo>
+<echo>- hermesArchi.home = ${hermesArchi.home}</echo>
+<echo>- framework.home = ${hermesArchi.home}</echo>
+
+		
+<echo file="${log.file}" append="true">
+- framework.home = ${framework.home}
+- hermesArchi.home = ${hermesArchi.home}
+</echo>
+
+		<!-- Héritage des classpath -->
+		<property name="ClassPath_JAR" value="./../classes ${HermesArchiJar} ${efluidEDKJar} ${FrameworkJar} ${FrameworkEnterpriseJar} " />
+		<property name="ClassPath_WAR" value="${context}.jar" />
+	
+		<!--
+		*********************************************************************
+		librairies nécessaires pour la compilation.
+		Le lecteur I doit être mappé sur
+			Zurich\Java à Paris,
+			Chablis\Java à Metz
+		*********************************************************************
+		-->
+		<!-- Répertoire des jar "courants" ldap  -->
+		<property name="ldap.home" value="I:/ldap"/>
+
+		<!-- Répertoire des jar "courants" Oracle  -->
+		<property name="oracle.home" value="I:/Oracle"/>
+
+		<!-- Répertoire additionnel pour les batchs : xerces + jsaper + axis + ... -->
+		<if>
+			<not>
+				<isset property="lib.projet.dir"/>
+			</not>
+			<then>
+				<property name="script.lib.dir" value="${projet.dir}/${cvs.module}/scripts/lib" />
+			</then>
+			<else>
+				<property name="script.lib.dir" value="${projet.dir}/${cvs.module}/${lib.projet.dir}" />
+			</else>
+		</if>
+			
+		<!-- Renommage du fichier hermes.js.prod en hermes.js -->
+		<if>
+			<not>
+				<isset property="renommageHermes.js"/>
+			</not>
+			<then>
+				<property name="renommageHermes.js" value="${non}"/>
+			</then>
+			<else>
+				<property name="renommageHermes.js" value="${renommageHermes.js}"/>
+			</else>
+		</if>
+		
+		<!-- Package pour le numéro de version de l'application -->
+		<if>
+			<isset property="${package.version}"/>
+			<then>
+				<property name="package.version" value="${package.version}"/>
+			</then>
+			<else>
+				<property name="package.version" value="com/hermes/ref/acteur/businessobject/"/>
+			</else>
+		</if>
+		
+		<delete dir="${temp.dir}/tmplibSpecifiques"/>
+		<mkdir dir="${temp.dir}/tmplibSpecifiques"/>
+		
+		<property name="librairies.jar.temp" value="${temp.dir}/tmplibSpecifiques"/>
+		
+		<echo file="${log.file}" append="true">
+		- librairies.jar.temp = ${librairies.jar.temp}
+		</echo>	
+		
+		
+		<copy todir="${librairies.jar.temp}"  overwrite="true" flatten="true">
+					<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques}"/>
+		</copy>
+		
+		<copy todir="${librairies.jar.temp}"  overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.j2ee}"/>
+		</copy>
+
+		<property name="librairies.jar.war.temp" value="${librairies.jar.temp}/librairiesSpecifiquesWAR"/>
+		
+		<delete dir="${librairies.jar.war.temp}"/>
+		<mkdir dir="${librairies.jar.war.temp}"/>
+		
+		<copy todir="${librairies.jar.war.temp}"  overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques.war}"/>
+		</copy>
+		<!-- classpath de compilation des sources java -->
+		<path id="project.class.path">
+		
+			<fileset dir="${lib.dir}">
+				<include name="**/*.jar"/>
+				<exclude name="hermesArchi*.jar"/>
+				<exclude name="framework*.jar"/>
+				<exclude name="efluidEDK*.jar"/>
+			</fileset>
+			
+			<fileset dir="${librairies.specifiques.dir}">
+				<include name="${librairies.j2ee}"/>
+			</fileset>
+			
+			<fileset dir="${librairies.jar.temp}">
+							<include name="**/*.jar"/>
+			</fileset>
+			
+			<fileset dir="${hermesArchi.home}">
+				<include name="*.jar"/>
+			</fileset> 
+			
+		    <fileset dir="${efluidEDK.home}">
+				<include name="*.jar"/>
+			</fileset>
+			
+			<fileset dir="${framework.home}">
+				<include name="*.jar"/>
+			</fileset>
+			
+			<fileset dir="${ldap.home}">
+				<include name="*.jar"/>
+			</fileset>
+			
+			<fileset dir="${oracle.home}">
+				<include name="*.jar"/>
+			</fileset>
+			
+			<fileset dir="${script.lib.dir}">
+				<include name="**/*.jar"/>
+			</fileset>
+		</path>
+		
+		<echo>
+		- librairies.specifiques.dir = ${librairies.specifiques.dir} 
+		</echo> 
+		
+
+	<!--Etapes du scripts. A executer dans l'ordre -->
+	<echo file="${log.file}" append="true">
+		Etape de démarrage du script : ${etape}
+	</echo>
+	<switch value="${etape}">
+		<case value="2">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="3">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="4">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="5">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+			<property name="etape4" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="6">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+			<property name="etape4" value="${etapeNonAutorisee}"/>
+			<property name="etape5" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="7">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+			<property name="etape4" value="${etapeNonAutorisee}"/>
+			<property name="etape5" value="${etapeNonAutorisee}"/>
+			<property name="etape6" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="8">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+			<property name="etape4" value="${etapeNonAutorisee}"/>
+			<property name="etape5" value="${etapeNonAutorisee}"/>
+			<property name="etape6" value="${etapeNonAutorisee}"/>
+			<property name="etape7" value="${etapeNonAutorisee}"/>
+		</case>
+		<default>
+			<echo file="${log.file}" append="true">
+		=> Cas par défaut. Toutes les étapes du script seront exécutées
+			</echo>
+		</default>
+	</switch>
+	<!--
+	les property qui n'auraient pas été valuées précédemment le sont à présent.
+	La valeur mise fait en sorte que l'étape est autorisée.
+	-->
+	<property name="etape1" value="${etapeAutorisee}"/>
+	<property name="etape2" value="${etapeAutorisee}"/>
+	<property name="etape3" value="${etapeAutorisee}"/>
+	<property name="etape4" value="${etapeAutorisee}"/>
+	<property name="etape5" value="${etapeAutorisee}"/>
+	<property name="etape6" value="${etapeAutorisee}"/>
+	<property name="etape7" value="${etapeAutorisee}"/>
+	<property name="etape8" value="${etapeAutorisee}"/>
+
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 1
+
+	Création d'une copie locale du module fonctionnel
+	On récupère uniquement les sources taggés
+
+	N.B.
+	le user de connexion à CVS est un paramètre du script.
+	idem pour le nom du serveur CVS
+	le tag "cvs.tag" est un paramètre du script. Si ce tag vaut LAST alors
+	c'est la dernière version de chaque fichier qui est récupérée.
+
+	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 1 : Récupération du source de CVS
+		*********************************************************************
+	</echo>
+	
+	<if>
+		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+	
+		<delete	dir="${cvs.dir}"/>
+		<mkdir	dir="${cvs.dir}"/>
+		<delete	dir="${checkout.dir}"/>
+		
+		<if>
+			<equals arg1="${cvs.tag}" arg2="LAST" />
+		<then>
+			<antcall target="getLASTFromCVS"/>
+		</then>
+		<else>
+			<foreach list="${cvs.tag}" target="getThisTagFromCVS" delimiter="+" param="item" inheritall="true"/>
+		</else>
+		</if>
+	
+		<!-- Récupération du jar des objets métiers-->
+		<if>
+			<equals arg1="${objetsMetier}" arg2="${oui}" />
+		<then>
+		<property name="hermesobjetsmetier.dir" value="${root}/application/${contexthermesobjetsmetier}"/>
+			<delete file="${lib.dir}/HermesObjetsMetier.jar"/>
+		<copy file="${hermesobjetsmetier.dir}/HermesObjetsMetier.jar" todir="${lib.dir}"/>
+		</then>
+		</if>
+		
+		<!-- il faut supprimer les classes de test unitaires -->
+		<delete includeEmptyDirs="true" >
+			<fileset dir="${sourcejava.dir}" caseSensitive="yes">
+				<include name="**/test/**/*.*" />
+			</fileset>
+			<fileset dir="${sourcejava.dir}" caseSensitive="yes">
+				<include name="**/jeudetest/**/*.*" />
+			</fileset>
+			<fileset dir="${web.dir}" caseSensitive="yes">
+				<include name="**/test/**/*.*" />
+			</fileset>
+		</delete>
+		
+		<echo file="${log.file}" append="true">
+			les classes de test unitaires ont été supprimées
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les sources de l'application ${cvs.module} n'ont pas été récupérées
+		</echo>
+	</else>
+	</if>
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 2 : Compilation des sources java de ${sourcejava.dir} vers ${build.dir}
+
+	Le répertoire cible de compilation doit être créé d'abord.
+	*********************************************************************
+	-->
+
+		
+	<target name="compilation" depends="getFromCVS">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 2 : Compilation des sources.
+		*********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	<then>
+		<delete	dir="${build.dir}"/>
+		<mkdir	dir="${build.dir}"/>
+
+		<record name="${log.dir}/compil.log" action="start" />
+		
+		<pathconvert property="pathtest" refid="project.class.path" />
+		<echo file="${log.file}" append="true">
+			pathtest = ${pathtest}
+		</echo>
+
+		<if>
+			<equals arg1="${debug}" arg2="${oui}"/>
+		<then>
+			<javac srcdir="${sourcejava.dir}"
+				   fork="yes"
+				   executable="${jdk.home}/bin/javac.exe"
+				   compiler="javac${jdk.version}"
+				   destdir="${build.dir}"
+				   memoryInitialSize="512m"
+				   memoryMaximumSize="1024m"
+				   nowarn="yes"
+				   debug="on">
+				<classpath refid="project.class.path"/>
+			</javac>
+		</then>
+		<else>
+			<javac srcdir="${sourcejava.dir}"
+				   fork="yes"
+				   executable="${jdk.home}/bin/javac.exe"
+				   compiler="javac${jdk.version}"
+				   destdir="${build.dir}"
+				   memoryInitialSize="512m"
+				   memoryMaximumSize="1024m"
+				   nowarn="yes">
+				<classpath refid="project.class.path"/>		
+			</javac>
+		</else>
+		</if>
+		
+		<record name="${log.dir}/compil.log" action="stop" />
+
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les sources n'ont pas été compilés
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 3 : Récuperation des properties.
+	********************************************************************
+	-->
+	<target name="properties" depends="compilation">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 3 : Récuperation des properties.
+		 *********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+		<then>
+			<delete dir="${properties.dir}"/>
+			<mkdir dir="${properties.dir}"/>
+
+			<!-- copie des xml dans le jar -->
+			<available file="${xml.dir}" type="dir" property="xml.dir.present"/>
+			<if><equals arg1="${xml.dir.present}"  arg2="true" />
+			<then>
+				<copy todir="${properties.dir}">
+					<fileset dir="${xml.dir}"/>
+				</copy>
+			</then>
+			</if>
+
+			<!-- copie des properties et xml "communs" dans le jar -->
+			<copy todir="${properties.dir}">
+				<fileset dir="${sourcejava.dir}" excludes="**/*.java"/>
+			</copy>
+
+			<available file="${projet.dir}/${cvs.module}/properties" type="dir" property="cvs.module.properties.present"/>
+			<if><equals arg1="${cvs.module.properties.present}"  arg2="true" />
+			<then>
+				<copy todir="${properties.dir}">
+					<fileset dir="${projet.dir}/${cvs.module}/properties"/>
+				</copy>
+			</then>
+			</if>
+
+			<copy todir="${properties.dir}">
+				<fileset dir="${sourceproperties.dir}" excludes="**/*.java"/>
+			</copy>
+
+			<!-- les fichiers societes.xml sont déplacés directement dans l'ear -->
+			<foreach list="${societes}" target="moveFichierSocieteXML" delimiter="," param="societe" inheritall="true" />
+									
+			<!-- le fichier framework2.properties est spécifique à l'environnement cible -->
+			<copy file="${parametrage.dir}\framework2.properties" todir="${properties.dir}" overwrite="true" />
+
+			<!-- le fichier hermes2.properties est spécifique à l'environnement cible -->
+			<copy file="${parametrage.dir}\hermes2.properties" todir="${properties.dir}" overwrite="true" />
+
+			<!-- le fichier EDK2.properties est spécifique à l'environnement cible : Redéfinition des libellés de l'application -->
+			<available file="${parametrage.dir}/EDK2.properties" property="EDK2.properties.present"	 />
+			<if><equals arg1="${EDK2.properties.present}"  arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/EDK2.properties"  todir="${properties.dir}" overwrite="true" />
+			</then>
+			</if>
+
+			<!-- maj du fichier application_fr.properties avec le numero de version et le nom de l'application -->
+			<available file="${squelettes.dir}/application_fr.properties" property="application_fr.properties.present" />
+			<if><equals arg1="${application_fr.properties.present}"  arg2="true" />
+			<then>
+				<copy file="${squelettes.dir}/application_fr.properties" todir="${properties.dir}" overwrite="true" />
+				<ant antfile="${script.xml.dir}/majFichier_applicationProperties.xml" inheritall="true">
+					<property name="appli_dir" value="${properties.dir}"/>
+					<property name="appli_langue" value="fr"/>
+					<property name="maj_type" value="ASS"/>
+					<property name="appli_nom" value="${application}"/>
+					<property name="appli_version" value="${env.VERSION_SVF}"/>
+				</ant>
+			</then>
+			</if>
+
+
+			<echo file="${log.file}" append="true">
+			OK
+			</echo>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+			Les properties n'ont pas été copiés
+			</echo>
+		</else>
+	</if>
+	</target>
+	
+	
+	<!--
+	*********************************************************************
+	ETAPE 4 : création des .AAR pour les services web d'efluidPub
+	*********************************************************************
+	-->
+	
+	<target name="makeAar" depends="properties">	
+	<if>
+		<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+		<then>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 4 : Création des .AAR pour les services web d'${context}
+		*********************************************************************
+		</echo>
+		
+		<record name="${log.dir}/makeAar.log" action="start" />	
+		<ant antfile="${script.xml.dir}/creation_aar.xml" inheritall="true"/>	
+		<record name="${log.dir}/makeAar.log" action="stop"/>
+
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+				Les fichiers .AAR n'ont pas été créés
+			</echo>
+		</else>
+	</if>
+	</target>
+	
+
+<!--
+	*********************************************************************
+	ETAPE 5 : création du JAR de l'application
+	*********************************************************************
+	-->
+	
+	<target name="makeJar" depends="makeAar">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 5 : Création du JAR de l'application.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeJar.log" action="start" />
+
+	<trycatch>
+		<try>
+			<mkdir dir="${exported.dir}"/>
+		</try>
+		<catch>
+			<echo file="${log.file}" append="true">
+			Le répertoire ${exported.dir} existe déjà
+			</echo>
+		</catch>
+	</trycatch>
+
+
+	<if>
+		<equals arg1="${etape5}" arg2="${etapeAutorisee}" />
+		<then>
+			<delete dir="${exported.dir}/jar"/>
+			<mkdir dir="${exported.dir}/jar"/>
+
+			<manifest file="${log.dir}\JAR_MANIFEST.MF">
+				<attribute name="Created-By" value="Java ${jdk.version}"/>
+				<attribute name="Built-By" value="${user.name}"/>
+				<attribute name="Built-Date" value='${TODAY_UK}'/>
+				<attribute name="Class-Path" value='${ClassPath_JAR}'/>
+				<section name="${package.version}">
+					<attribute name="Specification-Title" value="${application}" />
+					<attribute name="Specification-Version" value="${cvs.tag}" />
+					<attribute name="Specification-Vendor" value="CGI France - UEM" />
+					<attribute name="Implementation-Title" value="${application}" />
+					<attribute name="Implementation-Version" value="${cvs.tag}.${build.number}" />
+					<attribute name="Implementation-Vendor" value="CGI France - UEM" />
+				</section>
+			</manifest>
+
+			<jar jarfile="${exported.dir}/jar/${app_jar}" manifest="${log.dir}\JAR_MANIFEST.MF">
+				<fileset dir="${build.dir}" />
+			</jar>
+
+			<echo file="${log.file}" append="true">
+		OK
+			</echo>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+		Le fichier JAR n'a pas été créé
+			</echo>
+		</else>
+	</if>
+	<record name="${log.dir}/makeJar.log" action="stop" />
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 6 : test compilation des JSP
+	*********************************************************************
+	-->
+	<target name="testCompilJSP" depends="makeJar">
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			ETAPE 6 : test compilation des JSP
+			*********************************************************************
+		</echo>
+		<if>
+			<and>
+				<equals arg1="${etape6}" arg2="${etapeAutorisee}" />
+				<equals arg1="${testCompilJSP}" arg2="${oui}" />
+			</and>
+			<then>
+				<path id="jsp.class.path">
+					<fileset dir="${framework.home}">
+						<include name="${FrameworkEnterpriseJar}"/>
+					</fileset>
+					<fileset dir="${framework.home}">
+						<include name="${FrameworkJar}"/>
+					</fileset>
+					<fileset dir="${hermesArchi.home}">
+						<include name="${HermesArchiJar}"/>
+					</fileset>
+					<fileset dir="${efluidEDK.home}">
+						<include name="${efluidEDKJar}"/>
+					</fileset>
+					<fileset dir="${exported.dir}/jar">
+						<include name="${app_jar}"/>
+					</fileset>
+					<fileset dir="${lib.dir}" excludes="${librairie.exclude}">
+						<include name="*.jar"/>
+					</fileset>
+				</path>
+
+				<pathconvert targetos="windows" property="herited.class.path" refid="jsp.class.path"/>
+
+				<property name="buildJSP.dir" value="${web.dir}/WEB-INF/classes"/>
+
+				<ant antfile="${script.xml.dir}/compilationJSP2.xml" inheritall="true" inheritrefs="true">
+					<property name="pathelementJSP" value="${herited.class.path}"/>
+					<property name="propertyJSP.file.dir" value="${property.file.dir}"/>
+					<property name="JSP.dir" value="${web.dir}"/>
+				</ant>
+				
+				<!-- Si pas d'erreur de compilation on supprime le résultat de la compilation pour ne pas l'inclure dans le war -->
+				<delete dir="${buildJSP.dir}"/>
+
+			<echo file="${log.file}" append="true">
+				OK
+			</echo>
+			</then>
+			<else>
+				<echo file="${log.file}" append="true">
+			la compilation des JSP n'a pas été testée
+				</echo>
+			</else>
+		</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 7 : Création du WAR de l'application
+
+	Dans le war, le logo Efluid est remplacé par celui
+	qui se trouvent dans le répertoire de paramétrage.
+	*********************************************************************
+	-->
+	<target name="makeWar" depends="testCompilJSP">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 7 : Création du WAR de l'application.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeWar.log" action="start" />
+
+	<if>
+		<equals arg1="${etape7}" arg2="${etapeAutorisee}" />
+		<then>
+			<!-- Renommage du fichier hermes.js.prod en hermes.js -->
+			<available file="${web.dir}/jsp/arc/commun/js/hermes.js" property="hermes.js.present" />
+			<if>
+				<and>
+					<equals arg1="${renommageHermes.js}" arg2="${oui}"/>
+					<equals arg1="${hermes.js.present}" arg2="true" />
+				</and>
+			<then>
+				<delete file="${web.dir}/jsp/arc/commun/js/hermes.js"/>
+				<copy file="${web.dir}/jsp/arc/commun/js/hermes.js.prod" tofile="${web.dir}/jsp/arc/commun/js/hermes.js"/>
+			</then>
+			</if>
+			
+			<!-- Ecrasement de logoEfluid.gif -->
+			<available file="${parametrage.dir}/logoEfluid.gif" property="logoEfluid.present" />
+			<if><equals arg1="${logoEfluid.present}" arg2="true" />
+			<then>
+				<delete file="${web.dir}/jsp/arc/commun/images/general/logoEfluid.gif"/>
+				<copy file="${parametrage.dir}/logoEfluid.gif" todir="${web.dir}/jsp/arc/commun/images/general" overwrite="true" />
+			</then>
+			</if>
+
+			<!-- Ecrasement des fichiers de déploiement de la webapp (tous les fichiers de toutes les types de serveur d'app) -->
+			<copy todir="${web.dir}/WEB-INF" overwrite="true" >
+				<fileset dir="${parametrage.dir}" includes="*web.xml"/>
+				<fileset dir="${parametrage.dir}" includes="weblogic.xml"/>
+			</copy>
+
+			<!-- tri des librairies à inclure dans le Web-INF -->
+			<copy todir="${web.dir}/WEB-INF/lib" overwrite="true" >
+				<fileset dir="${exported.dir}/jar" includes="${app_jar}"/>
+				<fileset dir="${framework.home}" includes="${FrameworkJar}, ${FrameworkEnterpriseJar}, ${HermesArchiJar}"/>
+				<fileset dir="${efluidEDK.home}" includes="${efluidEDKJar}"/>
+				<fileset dir="${lib.dir}" includes="HermesObjetsMetier.jar"/>			
+				<fileset dir="${librairies.jar.war.temp}"/>
+			</copy> 								
+
+			<!-- ajout des properties dans le Web-INF -->
+			<copy todir="${web.dir}/WEB-INF/classes" overwrite="true" >
+				<fileset dir="${properties.dir}" />
+			</copy>
+			
+			<manifest file="${log.dir}\WAR_MANIFEST.MF">
+				<attribute name="Created-By" value="Java ${jdk.version}"/>
+				<attribute name="Class-Path" value='${ClassPath_WAR}'/>
+			</manifest>
+			
+			<!-- création du war en fonction de la présence de fichiers .aar -->
+			<if>
+				<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+				<then>
+					<war warfile="${exported.dir}/${app_war}" webxml="${web.dir}/WEB-INF/web.xml" manifest="${log.dir}/WAR_MANIFEST.MF">	
+					<fileset dir="${web.dir}" includes="jsp/**" excludes="**/*.psd,WEB-INF/**"/>
+					<fileset dir="${web.dir}" includes="help/**" excludes="**/*.psd,WEB-INF/**"/>
+					<fileset dir="${web.dir}" includes="ressourcesael/**" excludes="**/*.psd,WEB-INF/**"/>
+					<webinf dir="${web.dir}/WEB-INF">					
+						<!--on vide le repertoire services-->
+						<exclude name="services/*/"/>				
+					</webinf>
+					<!-- et on ajoute les fichiers .aar creer -->
+					<fileset dir="${web.dir}" includes="WEB-INF/services/*.aar"/>
+					</war>
+				</then>
+			<else>
+				<war warfile="${exported.dir}/${app_war}" webxml="${web.dir}/WEB-INF/web.xml" manifest="${log.dir}/WAR_MANIFEST.MF">	
+				<fileset dir="${web.dir}" includes="jsp/**" excludes="**/*.psd,WEB-INF/**"/>
+				<fileset dir="${web.dir}" includes="help/**" excludes="**/*.psd,WEB-INF/**"/>
+				<fileset dir="${web.dir}" includes="ressourcesael/**" excludes="**/*.psd,WEB-INF/**"/>
+				<webinf dir="${web.dir}/WEB-INF"/>
+				</war>
+			</else>
+			</if>
+			
+
+			<delete dir="${exported.dir}/jar"/>
+			
+			<echo file="${log.file}" append="true"> 
+		OK
+			</echo>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+		Le fichier WAR n'a pas été créé
+			</echo>
+		</else>
+	</if>
+	<record name="${log.dir}/makeWar.log" action="stop" />
+	</target>
+	
+	
+	<!--
+	*********************************************************************
+	ETAPE 8 : création du Zip de l'aide en ligne
+	*********************************************************************
+	-->
+	<target name="makeZipHelp" depends="makeWar">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 8 :	Création du Zip de l'aide en ligne
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeZip.log" action="start" />
+	<delete	dir="${exported.dir}/zip"/>
+	<mkdir	dir="${exported.dir}/zip"/>
+	<if>
+		<and>
+			<equals arg1="${etape7}" arg2="${etapeAutorisee}" />
+			<equals arg1="${zipHelp}" arg2="${oui}" />
+		</and>
+	<then>
+		<echo message=" delete 1 :${exported.dir}/${help_zip}"/>
+		<delete file="${exported.dir}/${help_zip}"/>
+		<echo message=" copy 1 :${help.dir}"/>
+		<copy todir="${exported.dir}/zip" >
+			<fileset dir="${help.dir}"/>
+		</copy>
+
+
+		<zip destfile="${exported.dir}/${help_zip}" basedir="${exported.dir}/zip"/>
+
+		<!-- nettoyage des sous-répertoires -->
+		<delete dir="${exported.dir}/zip"/>
+
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier Zip n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	<record name="${log.dir}/makeZip.log" action="stop" />
+	</target>
+
+	<target name="make">
+		<antcall target="makeZipHelp"/>
+	</target>
+
+</project>

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="integrationWLS" default="make" basedir="../.">
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+
+  <!-- *********************************************************************
+  Ce script permet de packager l'application avant déploiement sous Weblogic.
+
+  Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+	*********************************************************************
+	-->
+ 
+
+  <!--
+  *********************************************************************
+  	Initialisations
+  *********************************************************************
+  -->
+  <target name="init" depends="">
+
+   <!-- ExecDir -->
+    <if>
+	<not><isset property="${execDir}"/></not>
+    <then>
+	<property name="execDir" value="${basedir}"/>
+    </then>
+  </if>
+  <property name="root" value="${execDir}"/>
+  
+  <property name="temp.dir" value="${root}/tmp"/>
+  <property name="cvs.dir" value="${temp.dir}/projet"/>
+  <property name="projet.dir" value="${cvs.dir}"/>
+
+  <!--
+	*********************************************************************
+  	Le répertoire de log et le fichier log du script
+	*********************************************************************
+  -->
+  <property name="log.dir" value="${temp.dir}/log"/>
+  <property name="properties.dir" value="${root}/properties"/>
+
+  <!-- la JavaDoc -->
+  <property name="javadoc.dir" value="${root}/documentation/javadoc/api"/>
+
+
+  	<buildnumber file="${root}/build.number"/>
+    	<tstamp>
+      	<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+    	</tstamp>
+
+ 	<!--
+  	*********************************************************************
+		librairies nécessaires pour la compilation.
+		Le lecteur I doit être mappé sur
+			Zurich\Java à Paris,
+			Chablis\Java à Metz
+  	*********************************************************************
+  	-->
+
+  	<property name="framework.home.dev" value="I:/frameworkCGI/lib" />
+	<property name="framework.home.sources.kernel.dir" value="I:/frameworkCGI/sources/kernel" />
+	<property name="framework.home.sources.enterprise.dir" value="I:/frameworkCGI/sources/enterprise" />
+
+  	<property name="lib.dir" value="${projet.dir}/${cvs.module}/lib"/>
+
+  	<property name="framework.home" value="${lib.dir}"/>
+
+  	<property name="ldap.home" value="I:/ldap"/>
+  	<property name="oracle.home" value="I:/Oracle"/>
+	<property name="source.dir" value="${projet.dir}/${cvs.module}/src"/>
+
+	<!-- Répertoire de weblogic -->
+	<property name="weblogic.home.lib" value="I:/bea/weblogic81/server/lib"/>
+
+	<!-- Répertoire additionnel pour les batchs : xerces + jsaper + axis + ... -->
+	<property name="script.lib.dir" value="${projet.dir}/${cvs.module}/scripts/lib"/>
+
+
+	<!-- classpath de compilation des sources java -->
+  	<path id="project.class.path">
+  		<fileset dir="${lib.dir}">
+    			<include name="**/*.jar"/>
+  		</fileset>
+  		<fileset dir="${framework.home}">
+    			<include name="**/*.jar"/>
+  		</fileset>
+  		<fileset dir="${ldap.home}">
+        		<include name="**/*.jar"/>
+  		</fileset>
+  		<fileset dir="${oracle.home}">
+        		<include name="**/*.jar"/>
+  		</fileset>
+  		<fileset dir="${weblogic.home.lib}">
+        		<include name="**/*.jar"/>
+  		</fileset>
+  		<fileset dir="${script.lib.dir}">
+        		<include name="**/*.jar"/>
+  		</fileset>
+  	</path>
+
+  </target>
+
+  <!--
+  *********************************************************************
+  ETAPE 3 : Génération de la javaDoc vers ${javadoc.dir}
+  *********************************************************************
+  -->
+  <target name="makeJavadoc" depends="init">
+	<record name="${log.dir}/makeJavadoc.log" action="start" />
+	
+				<delete dir="${javadoc.dir}"/>
+					<mkdir dir="${javadoc.dir}"/>
+
+					<!-- génération de la JavaDoc -->
+					<javadoc verbose="false"
+						 packagenames="com.hermes.*,com.imrglobal.*"
+						 destdir="${javadoc.dir}"
+						 sourcepath="${source.dir}"
+						 author="true"
+						 version="true"
+						 use="true"
+						 windowtitle="Hermes API"
+						 maxmemory="512m">
+						<classpath refid="project.class.path"/>
+						<doctitle><![CDATA[<h1>Hermes</h1>]]></doctitle>
+						<bottom><![CDATA[<i>Copyright &#169; 2003 UEM. All Rights Reserved.</i>]]></bottom>
+					</javadoc>
+
+
+	<record name="${log.dir}/makeJavadoc.log" action="stop" />
+  </target>
+
+
+  <target name="make">
+    <antcall target="makeJavadoc"/>
+  </target>
+
+</project>

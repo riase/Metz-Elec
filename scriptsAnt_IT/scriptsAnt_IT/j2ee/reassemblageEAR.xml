@@ -1,0 +1,1213 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="reassemblageAppliJ2EE" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!-- Ajout d'un package pour utiliser le task XML -->
+	<taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"/>
+	
+	<path id="jonas.classpath">
+		<fileset dir="${jonas.root}">
+			<include name="lib/bootstrap/client-bootstrap.jar"/>
+			<include name="lib/client.jar"/>
+			<include name="lib/common/ow_jonas_ant.jar"/>
+		</fileset>
+	</path>
+		
+	<!-- Ajout d'un package pour utiliser le task GenIC de jonas -->
+	<taskdef name="genic" classname="org.objectweb.jonas.ant.GenICTask" classpath="${jonas.root}/lib/common/ow_jonas_ant.jar" />
+
+	<!-- *********************************************************************
+	Ce script permet de paramétrer l'application avant déploiement sous Weblogic.
+
+		etape 1 : récupération des sources CVS
+		etape 2 : unzip des binaires
+		etape 3 : compilation JSP
+		etape 4 : properties de paramétrage
+		etape 5 : ear
+
+	Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+		
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+	cvs.basemodule : nom COMPLET du module de base CVS à récupérer contenant les livraisons (ex : assemblage)
+	source.versionCVS : nom du tag posé sur le source. Par défaut = LAST (dernière version archivée dans INT)
+
+	cvs.lot : lot du module à récupérer (Lot2 par ex). Il s'agit du nom du répertoire du lot dans CVS int 
+
+	cvs.tag : version du module à récupérer (LIV_2_1_14 par ex).  Il s'agit du nom du répertoire de la livraison dans CVS int
+
+	context1 : un nom de l'application archivé (= sous répertoire CVS)
+							exemple : hermesSP1
+							valeur par défaut : hermes
+
+	context2 : nom du contexte de déploiement de l'application (= sous répertoire du paramétrage)
+							Utilisé aussi pour constituer les noms des fichers JAR, EAR, WAR si différent de "hermes".
+							valeur par défaut : hermes
+
+	OPTIONNELS
+	etape : etape de démmarrage du script. Pas de valeur par défaut
+					(=> on commence donc par la première étape)
+
+	deployHelp			: Y si on souhaite intégrer l'aide en ligne dans l'EAR, N sinon. Y par défaut.
+	Help.dir   			: nom du répertoire d'aide ligne. Par défaut, "help".
+	staticData 			: Y si on veut générer un zip des données statiques
+	compilJSP				: Y si on veut compiler les JSP, C sion veut copier une compilation précédente, N sinon (par défaut). dans le cas de la compilation on doit spécifier le SApp cible.
+	librairies.specifiques	: liste des jar à inclure dans le war (none par défaut)
+	librairies.specifiques.dir	: répertoire où se trouvent les librairies.
+	librairies.specifiques.classpath: classpath additionnel si on rajoute des librairies en plus (optionnel)
+
+	typeAppServer   : nom du serveur d'application. Ex. jonas, weblogic, websphere.
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f reassemblageAppliJ2EE.xml -Dcvs.basemodule=assemblage -Dcvs.tag=LIV_2_1_14 -Dcvs.lot=LOT2.1 -Dcontext1=hermesSP1 -Dcontext2=hermesMOA2114
+	 [-Detape=1 -DcompilJSP=Y -DtypeAppServer=weblogic ]
+
+
+	Pour que le script fonctionne, le répertoire de paramétrage (${parametrage.dir})
+	doit contenir les ressources suivantes :
+
+		fichiers properties :
+			framework2.properties
+			hermes2.properties
+			
+		fichiers xml (optionnel)
+			uem.xml, gedia.xml ou reseipc.xml
+			weblogic.xml
+			
+		images
+			accueil.jpg (optionnel)
+			logoEfluid.gif
+
+	*********************************************************************
+	-->
+
+
+	<!-- propriétés pour le déroulement des étapes du script -->
+	<property name="oui" value="Y"/>
+	<property name="non" value="N"/>
+	<property name="etapeAutorisee" value="${oui}"/>
+	<property name="etapeNonAutorisee" value="${non}"/>
+	<property name="copie" value="C"/>
+
+	<target name="majFichierParametrageXML">
+		<!-- le fichier xml est éventuellement spécifique à l'environnement cible -->
+		<available file="${parametrage.dir}/${societe}.xml" property="present" />
+		<if>
+			<equals arg1="${present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/${societe}.xml" todir="${exported.dir}/ear/properties" overwrite="true" />
+				<echo file="${log.file}" append="true">
+					Le fichier ${societe}.xml a été écrasé
+				</echo>
+			</then>
+		</if>
+
+		<!-- les paramètres Saturne/Diva du fichier xml sont spécifiques à l'environnement cible.
+					Et ils doivent être cryptés -->
+		<ant antfile="${script.xml.dir}/majFichierParametrageXML.xml" inheritall="true">
+			<property name="XML.societe" value="${societe}"/>
+			<property name="XML.properties.dir" value="${exported.dir}/ear/properties"/>
+		</ant>
+	</target>
+
+	<target name="majFichierDeploiementEJB.xml">
+		<copy file="${fichierDeploiementEJB}" tofile="${fichierDeploiementEJB}.old"/>
+
+		<!-- récupération du nom du fichier (sans le chemin) -->
+		<basename property="fichierDeploiementEJB.file" file="${fichierDeploiementEJB}" />
+
+		<propertycopy name="ejb.jndi.path" from="${fichierDeploiementEJB.file}.jndi.path"/>
+		<propertycopy name="ejb.dtd.catalogue" from="${fichierDeploiementEJB.file}.xmlcatalog"/>
+		<propertycopy name="ejb.dtd.file" from="${fichierDeploiementEJB.file}.dtd"/>
+		
+		<echo file="${log.file}" append="true">
+		Les paramètres sont :
+			fichierDeploiementEJB.file=${fichierDeploiementEJB.file}
+			jndi.path = ${ejb.jndi.path}
+			catalogue = ${ejb.dtd.catalogue}
+			dtd = ${ejb.dtd.file}
+		</echo>
+
+		<if>
+			<equals arg1="${fichierDeploiementEJB.file}" arg2="jonas-ejb-jar.xml"/>
+			<then>
+				<!-- problème avec le DTD Jonas -->
+				<if>
+						<equals arg1="${ejb.type}" arg2="EJBStateless"/>
+					<!-- Cas par défaut : ce sera l'EJB statefull qui sera ajouté à l'ear -->
+					<then>
+						<replace file="${fichierDeploiementEJB}" token='jndi-name>businessControllerStatelessCMT' value='jndi-name>businessControllerStatelessCMT${context2bis}' />
+						<replace file="${fichierDeploiementEJB}" token='jndi-name>${efluidJndiName}' value='jndi-name>businessControllerStatelessCMT${context2bis}' />
+						<replace file="${fichierDeploiementEJB}" token='ejb-name>${efluidEjbName}' value='ejb-name>businessControllerStatelessCMT' />
+					</then>
+					<!-- Sinon on ajoute l'EJB indiqué dans la valeur de la property ejb.type -->
+					<else>
+						<replace file="${fichierDeploiementEJB}" token='jndi-name>businessController' value='jndi-name>businessController${context2bis}' />
+						<replace file="${fichierDeploiementEJB}" token='jndi-name>${efluidJndiName}' value='jndi-name>businessController${context2bis}' />
+						<replace file="${fichierDeploiementEJB}" token='ejb-name>${efluidEjbName}' value='ejb-name>businessController' />
+					</else>
+				</if>
+				<!--<replace file="${fichierDeploiementEJB}" token='jndi-name>businessController' value='jndi-name>businessController${context2bis}' />-->
+				
+			</then>
+			<else>
+				<xmlcatalog id="dtds">
+ 					<dtd publicId="${ejb.dtd.catalogue}" location="${script.xml.dtd.dir}/${ejb.dtd.file}"/>
+				</xmlcatalog>
+				<xmltask source="${fichierDeploiementEJB}.old" dest="${fichierDeploiementEJB}">
+					<xmlcatalog refid="dtds"/>
+					<replace path="${ejb.jndi.path}/text()" withText="businessController${context2bis}" />
+				</xmltask>
+			</else>
+		</if>
+
+		<delete file="${fichierDeploiementEJB}.old"/>
+	</target>
+
+	<target name="majFichierDeploiementEJB.xmi">
+		<copy file="${fichierDeploiementEJB}" tofile="${fichierDeploiementEJB}.old"/>
+
+		<!-- récupération du nom du fichier (sans le chemin) -->
+		<basename property="fichierDeploiementEJB.file" file="${fichierDeploiementEJB}" />
+
+		<propertycopy name="ejb.jndi.token" from="${fichierDeploiementEJB.file}.jndi.token"/>
+		
+		<echo file="${log.file}" append="true">
+		Les paramètres sont :
+			fichierDeploiementEJB.file=${fichierDeploiementEJB.file}
+			jndi.token = ${ejb.jndi.token}
+		</echo>
+
+		<if>
+			<equals arg1="${ejb.jndi.token}" arg2=""/>
+			<then>
+				<echo file="${log.file}" append="true">
+					pas de paramètre $${ejb.jndi.token}
+				</echo>
+			</then>
+			<else>
+				<replace file="${fichierDeploiementEJB}" token='${ejb.jndi.token}="businessController"' value='${ejb.jndi.token}="businessController${context2bis}"' />
+			</else>
+		</if>
+		<replace file="${fichierDeploiementEJB}" token='hermesJ2EE' value='${context2bis}' />
+
+		<delete file="${fichierDeploiementEJB}.old"/>
+	</target>
+
+	<!--
+	*********************************************************************
+	Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+		<!-- ExecDir -->
+		<if>
+			<not><isset property="${execDir}"/></not>
+		<then>
+				<property name="execDir" value="${basedir}"/>
+		</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+
+		<!-- xmlCommunDir -->
+		<if>
+			<not><isset property="${xmlCommunDir}"/></not>
+		<then>
+			<property name="xmlCommunDir" value="${basedir}/scripts"/>
+		</then>
+		</if>
+		<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+
+		<property environment="env"/>
+		<property name="temp.dir" value="${root}/tmplivraisons"/>
+		<property name="livraisons.dir" value="${root}/../livraisons"/>
+		<property name="cvs.dir" value="${temp.dir}/projet"/>
+		<property name="projet.dir" value="${cvs.dir}"/>
+		<property name="script.xml.dir" value="${root}/scripts"/>
+		<property name="script.xml.dtd.dir" value="${script.xml.dir}/dtd"/>
+		<property name="script.xml.properties.dir" value="${script.xml.dir}/properties"/>
+
+		<property name="resources.dir" value="${root}/parametrage/application"/>
+
+		<!--
+		*********************************************************************
+		Le répertoire de log et le fichier log du script
+		*********************************************************************
+		-->
+			<buildnumber file="${basedir}/build.number"/>
+			<tstamp>
+				<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+		<property name="log.dir" value="${temp.dir}/log.${build.number}"/>
+		<property name="log.file" value="${log.dir}/reAssemblageAppliJ2EE.log"/>
+		<property name="properties.dir" value="${root}/properties"/>
+
+
+		<!-- creation du répertoire et du fichier de log général -->
+		<delete dir="${log.dir}"/>
+		<mkdir dir="${log.dir}"/>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+		Lancement du script de reassemblage de l'application J2EE
+		*********************************************************************
+		property.file=${property.file}
+		</echo>
+
+		<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+		<if>
+			<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+		<then>
+			<property name="property.file.dir" value="scripts"/>
+		</then>
+		</if>
+		<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+		<if>
+			<equals arg1="${property.file.present}" arg2="true" />
+			<then>
+				<echo file="${log.file}" append="true">
+		Utilisation du fichier ${property.file}
+				</echo>
+				<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+			</then>
+			<else>
+				<echo file="${log.file}" append="true">
+			Pas de fichier de propriétés dans ${root}\${property.file.dir}
+				</echo>
+			</else>
+		</if>
+		
+		<!-- Serveur d'application -->
+		<if>
+			<or>
+				<equals arg1="${typeAppServer}" arg2="$${typeAppServer}" />
+				<equals arg1="${versionAppServer}" arg2="$${versionAppServer}" />
+				<equals arg1="${homeAppServer}" arg2="$${homeAppServer}" />
+			</or>
+			<then>
+				<fail message="Les parametres typeAppServer, versionAppServer et homeAppServer sont obligatoires"/>
+				<echo file="${log.file}" append="true">
+			Les parametres typeAppServer, versionAppServer et homeAppServer sont obligatoires.
+				</echo>
+			</then>
+		</if>
+		<property name="appserver.dtd.dir" value="${homeAppServer}/${typeAppServer}/${versionAppServer}"/>
+		<property name="appserver.property.dir" value="${homeAppServer}/${typeAppServer}/${versionAppServer}"/>
+		<if>
+			<equals arg1="${appserver.property.file}" arg2="$${appserver.property.file}" />
+			<then>
+				<property name="appserver.property.file" value="appServer.properties"/>
+			</then>
+		</if>
+		<available file="${appserver.property.dir}/${appserver.property.file}" property="appServer.property.file.present" />
+		<if>
+			<equals arg1="${appServer.property.file.present}" arg2="true" />
+			<then>
+				<echo file="${log.file}" append="true">
+			Fichier de paramétrage pour les EJB: ${appserver.property.dir}/${appserver.property.file}
+				</echo>
+				<loadproperties srcFile="${appserver.property.dir}/${appserver.property.file}"/>
+			</then>
+			<else>
+				<fail message="Pas de fichier ${appserver.property.dir}/${appserver.property.file}"/>
+				<echo file="${log.file}" append="true">
+			Pas de fichier ${appserver.property.dir}/${appserver.property.file}
+				</echo>
+			</else>
+		</if>
+		
+		<!-- librairies à inclure -->
+		<if>
+			<not><isset property="${librairies.specifiques}"/></not>
+			<then>
+				<property name="librairies.specifiques" value="${none}"/>
+			</then>
+			<else>
+				<!-- le répetoire doit être indiqué dans ce cas -->
+				<if>
+					<not><isset property="${librairies.specifiques.dir}"/></not>
+					<then>
+						<fail message="le paramètre librairies.specifiques.dir est obligatoire"/>
+					</then>
+				</if>
+			</else>
+		</if>
+		<if>
+			<not><isset property="${librairies.specifiques.classpath}"/></not>
+			<then>
+				<property name="librairies.specifiques.classpath" value="${none}"/>
+			</then>
+		</if>
+		<echo file="${log.file}" append="true">
+			librairies.specifiques = ${librairies.specifiques}
+			librairies.specifiques.dir = ${librairies.specifiques.dir}
+			librairies.specifiques.classpath = ${librairies.specifiques.classpath}
+		</echo>
+
+
+		<!-- Serveur d'application -->
+		<if>
+			<equals arg1="${typeAppServer}" arg2="$${typeAppServer}" />
+			<then>
+				<fail message="Le parametre typeAppServer est obligatoire"/>
+			</then>
+		</if>
+		
+		<!-- les modules EJB -->
+		<property name="ejb.dir" value="${parametrage.dir}"/>
+		<property name="businessController" value="${ejb.dir}/businessController.jar"/>
+
+		<!-- Répertoire de sauvegarde des JSP : valeur par défaut -->
+		<if>
+			<not><isset property="compilJSP.sav.dir"/></not>
+		<then>
+			<property name="compilJSP.sav.dir" value="compilJSP"/>
+		</then>
+		</if>
+		<property name="compilJSP.sav.path" value="${temp.dir}/${compilJSP.sav.dir}"/>
+
+
+		<!--
+		*********************************************************************
+			le résultat du script se trouve dans le répertoire exported.dir.
+			Il s'agit de : un ear
+			Le nom des fichiers dépend de la propriété "context2"
+
+			Seul le fichier ear doit être déployé
+		*******************************************************************
+		-->
+
+		<if>
+			<not><isset property="context1"/></not>
+		<then>
+			<property name="context1" value="hermes"/>
+		</then>
+		</if>
+
+		<if>
+			<not><isset property="context2"/></not>
+		<then>
+			<property name="context2" value="hermes"/>
+		</then>
+		</if>
+
+		<property name="exported.dir" value="${root}/application/${context2}"/>
+		<property name="parametrage.dir" value="${resources.dir}/${context2}"/>
+		<property name="projet.j2ee.dir" value="${cvs.dir}/${cvs.basemodule}/${cvs.lot}/${cvs.tag}/j2ee/application/${context1}"/>
+		<property name="module.dir" value="j2ee/application/${context1}"/>
+		
+		<!-- Récupération du contexte de l'EJB -->
+		<if>
+			<or>
+				<equals arg1="${context.ejb}" arg2="$${context.ejb}"/>
+				<equals arg1="${context.ejb}" arg2=""/>
+			</or>
+			<!-- Sortie en erreur si le paramètre n'est pas renseigné  -->
+			<then>
+				<fail message="Le paramètre context.ejb est obligatoire! A renseigner dans le fichier ${property.file}."/>
+				<echo file="${log.file}" append="true">
+					Le paramètre context.ejb est obligatoire! A renseigner dans le fichier ${property.file}.
+				</echo>
+			</then>
+			<else>
+				<!-- Définition des paramètres pour la récupération du businessController -->
+				<if>
+					<or>
+						<equals arg1="${ejb.type}" arg2="$${ejb.type}"/>
+						<equals arg1="${ejb.type}" arg2=""/>
+					</or>
+					<!-- Cas par défaut : ce sera l'EJB statefull qui sera ajouté à l'ear -->
+					<then>
+						<property name="module.ejb.dir" value="j2ee/EJBStatefull/${context.ejb}"/>
+						<property name="projet.j2ee.ejb.dir" value="${cvs.dir}/ejb/${cvs.basemodule}/${cvs.lot}/${cvs.tag}/${module.ejb.dir}"/>
+						<property name="ejb_jar_new" value="${exported.dir}/ear/businessController.jar"/>
+					</then>
+					<!-- Sinon on ajoute l'EJB indiqué dans la valeur de la property ejb.type -->
+					<else>
+						<property name="module.ejb.dir" value="j2ee/${ejb.type}/${context.ejb}"/>
+						<property name="projet.j2ee.ejb.dir" value="${cvs.dir}/ejb/${cvs.basemodule}/${cvs.lot}/${cvs.tag}/${module.ejb.dir}"/>
+						<property name="ejb_jar_new" value="${exported.dir}/ear/businessControllerStatelessCMT.jar"/>
+					</else>
+				</if>
+			</else>
+		</if>
+
+		<!-- si context2bis=context2 ou context2 sans son sous-répertoire -->
+		<basename property="context2bis" file="${exported.dir}/${context2}"/>
+
+		<!-- les ressources particulières -->
+		<property name="app_ear" value="${exported.dir}/${context2bis}.ear"/>
+		<property name="app_war" value="${exported.dir}/ear/${context2bis}.war"/>
+		<property name="ejb_jar" value="${exported.dir}/ear/businessController.jar"/>
+		<property name="web.dir" value="${exported.dir}/war"/>
+
+		<!-- Déploiement de l'aide en ligne -->
+		<if>
+			<equals arg1="${deployHelp}" arg2="$${deployHelp}" />
+			<then>
+				<property name="deployHelp" value="${oui}"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${Help.dir}" arg2="$${Help.dir}" />
+			<then>
+				<property name="Help.dir" value="help"/>
+			</then>
+		</if>
+		
+		<!-- Constitution du war -->
+		<if>
+			<equals arg1="${build.war}" arg2="$${build.war}"  />
+			<then>
+				<property name="build.war" value="${oui}" />
+			</then>
+		</if>
+
+		<!-- Compilation des JSP -->
+		<if>
+			<not><isset property="${compilJSP}"/></not>
+		<then>
+			<property name="compilJSP" value="${non}"/>
+		</then>
+		</if>
+		<!-- staticData -->
+		<if>
+			<not><isset property="${staticData}"/></not>
+		<then>
+			<property name="staticData" value="${non}"/>
+		</then>
+		</if>
+
+		<!-- connexion à CVS -->
+		<if>
+			<equals arg1="${cvs.login}" arg2="$${cvs.login}" />
+			<then>
+				<property name="cvs.login" value="adminINT"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.server}" arg2="$${cvs.server}" />
+			<then>
+				<property name="cvs.server" value="hermescvs"/>
+			</then>
+		</if>
+		<if>
+			<equals arg1="${cvs.repo}" arg2="$${cvs.repo}" />
+			<then>
+				<property name="cvs.repo" value="/INT"/>
+			</then>
+		</if>
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+
+		<if>
+			<equals arg1="${web_timeout}" arg2="$${web_timeout}" />
+			<then>
+				<echo file="${log.file}" append="true">
+				Warning : timeout de session non surchargé (web.xml). Valeur par défaut à 20 min
+				</echo>
+				<property name="web_timeout" value="20"/>
+			</then>
+		</if>
+
+		<!--Etapes du scripts. A executer dans l'ordre -->
+		<echo file="${log.file}" append="true">
+			Etape de démarrage du script : ${etape}
+		</echo>
+		<switch value="${etape}">
+			<case value="2">
+				<property name="etape1" value="${etapeNonAutorisee}" />
+			</case>
+			<case value="3">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+			</case>
+			<case value="4">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+				<property name="etape3" value="${etapeNonAutorisee}"/>
+			</case>
+			<case value="5">
+				<property name="etape1" value="${etapeNonAutorisee}"/>
+				<property name="etape2" value="${etapeNonAutorisee}"/>
+				<property name="etape3" value="${etapeNonAutorisee}"/>
+				<property name="etape4" value="${etapeNonAutorisee}"/>
+			</case>
+			<default>
+				<echo file="${log.file}" append="true">
+					=> Cas par défaut. Toutes les étapes du script seront exécutées
+				</echo>
+			</default>
+		</switch>
+		<!--
+		les property qui n'auraient pas été valuées précédemment le sont à présent.
+		La valeur mise fait en sorte que l'étape est autorisée.
+		-->
+		<property name="etape1" value="${etapeAutorisee}"/>
+		<property name="etape2" value="${etapeAutorisee}"/>
+		<property name="etape3" value="${etapeAutorisee}"/>
+		<property name="etape4" value="${etapeAutorisee}"/>
+		<property name="etape5" value="${etapeAutorisee}"/>
+		<property name="etape6" value="${etapeAutorisee}"/>
+		<!-- récuperation du paramétrage XML spécifique à la PF-->
+		<available file="${parametrage.dir}/parametrageXML.properties" property="parametrageXML.present" />
+		<if>
+			<equals arg1="${parametrageXML.present}" arg2="true" />
+			<then>
+				<loadproperties srcFile="${parametrage.dir}/parametrageXML.properties"/>
+			</then>
+			<else>
+				<fail message="le fichier ${parametrage.dir}/parametrageXML.properties est introuvable"/>
+			</else>
+		</if>
+
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 1 : récupération de l'assemblage
+  *********************************************************************
+  -->
+	<target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+ 			ETAPE 1 : Récupération de l'assemblage depuis CVS
+		*********************************************************************
+		module.dir = ${module.dir}
+		module.ejb.dir = ${module.ejb.dir}
+	</echo>
+	<if>
+ 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+		<if>
+			<not><isset property="source.versionCVS"/></not>
+		<then>
+			<property name="source.versionCVS" value="LAST"/>
+		</then>
+		</if>
+		
+		<!-- Checkout de l'application -->
+		<ant antfile="${script.xml.commun.dir}/getCibleFromCVS.xml" inheritall="true">
+			<property name="cvs.module" value="${module.dir}"/>
+			<property name="CvsProjetDir" value="${cvs.dir}"/>
+			<property name="CvsVersion" value="${source.versionCVS}"/>
+		</ant>
+		
+		<!-- Checkout du businessController -->
+		<ant antfile="${script.xml.commun.dir}/getCibleFromCVS.xml" inheritall="true">
+			<property name="cvs.module" value="${module.ejb.dir}"/>
+			<property name="CvsProjetDir" value="${cvs.dir}/ejb"/>
+			<property name="CvsVersion" value="${source.versionCVS}"/>
+		</ant>
+		
+		<echo file="${log.file}" append="true">
+			les binaires de l'application ${module.dir} ont été récupérés
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les binaires de l'application ${module.dir} n'ont pas été récupérés
+		</echo>
+	</else>
+	</if>
+	</target>
+
+  
+	<!--
+  *********************************************************************
+  ETAPE 2 : Unzip des binaires.
+   ********************************************************************
+  -->
+	<target name="unzip" depends="getFromCVS">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 2 : Unzip des binaires.
+		*********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	<then>
+		<trycatch>
+			<try>
+				<mkdir dir="${exported.dir}"/>
+			</try>
+			<catch>
+				<delete>
+					<fileset dir="${exported.dir}/*.ear"/>
+				</delete>
+			</catch>
+		</trycatch>
+		
+		<unzip src="${projet.j2ee.dir}/${context1}.ear"
+			dest="${exported.dir}/ear">
+		</unzip>
+
+		<!-- Copie du businessController.jar -->
+		<copy file="${projet.j2ee.ejb.dir}/businessController.jar" todir="${exported.dir}/ear" overwrite="true"/>
+		
+		<unzip src="${ejb_jar}"
+			dest="${exported.dir}/jar">
+		</unzip>
+
+		<unzip src="${exported.dir}/ear/${context1}.war"
+			dest="${exported.dir}/war">
+		</unzip>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les binaires n'ont pas été dézippés
+		</echo>
+	</else>
+	</if>
+	</target>
+<!--
+	*********************************************************************
+	ETAPE 3 : génération données statique
+	********************************************************************
+	-->
+	<target name="staticData" depends="unzip">
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			ETAPE 3 : Generation données statiques
+			*********************************************************************
+		</echo>
+		<if>
+				<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+			<then>
+				<if>
+					<!-- compilation -->
+					<equals arg1="${staticData}" arg2="${oui}" />
+					<then>
+					<delete file="${exported.dir}/${staticData.zip}"/>
+					<zip destfile="${exported.dir}/${staticData.zip}"
+					       basedir="${exported.dir}/war"
+					       includes="jsp/**/*"
+					       excludes="**/*.jsp,**/*.jspf"
+					  />
+					</then>
+				</if>
+			</then>
+		</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 4 : Compilation des JSP
+	********************************************************************
+	-->
+	<target name="compilationJSP" depends="staticData">
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			ETAPE 4 : Compilation des JSP.
+			*********************************************************************
+		</echo>
+		<if>
+				<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+			<then>
+				<if>
+					<!-- compilation -->
+					<equals arg1="${compilJSP}" arg2="${oui}" />
+					<then>
+						<!--<delete dir="${compilJSP.sav.path}"/>-->
+						<mkdir dir="${compilJSP.sav.path}"/>
+						<mkdir dir="${web.dir}/WEB-INF/classes"/>
+
+						<path id="jsp.class.path">
+							<fileset dir="${exported.dir}/ear">
+								<include name="**/*.jar"/>
+							</fileset>
+						</path>
+
+						<pathconvert targetos="windows" property="herited.class.path" refid="jsp.class.path"/>
+						
+						<ant antfile="${script.xml.dir}/compilationJSP2.xml" inheritall="true" inheritrefs="true">
+							<property name="pathelementJSP" value="${herited.class.path}"/>
+							<property name="JSP.dir" value="${web.dir}"/>
+						</ant>
+						
+						<!-- copie du résultat de la compilation pour réutilisation -->
+						<copy todir="${compilJSP.sav.path}" >
+							<fileset dir="${web.dir}/WEB-INF/classes"/>
+						</copy>
+					</then>
+					<else>
+						<if>
+							<!-- réutilisation de la compilation -->
+							<equals arg1="${compilJSP}" arg2="${copie}" />
+							<then>
+
+								<trycatch>
+									<try>
+										<mkdir dir="${web.dir}/WEB-INF/classes"/>
+									</try>
+									<catch>
+										<echo file="${log.file}" append="true">
+										Le répertoire ${web.dir}/WEB-INF/classes existe déjà, il est vidé.
+										</echo>
+										<delete includeemptydirs="true">
+											<fileset dir="${web.dir}/WEB-INF/classes" includes="**/*"/>
+										</delete>
+									</catch>
+								</trycatch>
+								
+								<copy todir="${web.dir}/WEB-INF/classes" >
+									<fileset dir="${compilJSP.sav.path}"/>
+								</copy>
+							</then>
+						</if>
+					</else>
+				</if>
+			</then>
+		</if>
+	</target>
+
+
+
+	<!--
+	*********************************************************************
+	ETAPE 5: écrasement des fichiers de paramétrage.
+	********************************************************************
+	-->
+	<target name="properties" depends="compilationJSP">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+		ETAPE 5 : écrasement des fichiers de paramétrage.
+		*********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape5}" arg2="${etapeAutorisee}" />
+	<then>
+
+		
+		<!-- mise à jour du JNDI_BUSINESS_CONTROLLER dans le fichier framework2.properties -->
+		<!-- businessController est suffixé avec le nom du context de destination          -->
+		<!-- un fichier en lecture seule passe automatiquement en modification             -->
+		<!-- Mettre à jour le nom du businessController dans eFluidNetServer                -->
+		<replaceregexp file="${parametrage.dir}\framework2.properties" match="JNDI_BUSINESS_CONTROLLER=(\w*)$" replace="JNDI_BUSINESS_CONTROLLER=businessController${context2bis}" byline="true"/>
+
+		<!-- le fichier framework2.properties est spécifique à l'environnement cible -->
+		<delete file="${exported.dir}/ear/properties\framework2.properties"/>
+		<copy file="${parametrage.dir}\framework2.properties" todir="${exported.dir}/ear/properties"/>
+
+		<!-- le fichier Hermes2.properties est spécifique à l'environnement cible -->
+		<delete file="${exported.dir}/ear/properties\hermes2.properties"/>
+		<copy file="${parametrage.dir}\hermes2.properties" todir="${exported.dir}/ear/properties"/>
+
+				<echo>gestionParametrageCentralise = ${gestionParametrageCentralise}</echo>
+	
+		<if>
+			<equals arg1="${gestionParametrageCentralise}" arg2="true" />
+		<then>
+			<if>
+				<not><isset property="params.file"/></not>
+			<then>
+				<property name="params.file" value="parametrageefluid.properties"/>
+			</then>
+			</if>
+			
+			<ant antfile="${script.xml.commun.dir}/parametrageFichier.xml" inheritall="true">
+				<property name="source.dir" value="${exported.dir}"/>
+				<property name="cible.dir" value="${exported.dir}"/>
+				<property name="params.dir" value="${parametrage.dir}"/>
+				<property name="appli.brique" value="ear" />
+			</ant>
+				
+			<echo file="${log.file}" append="true"> 
+			==> source.dir = cible.dir = ${exported.dir}
+			==> params.dir = ${parametrage.dir}
+			==> params.file = ${params.file}
+			==> appli.type = ${appli.type}
+			==> appli.brique = ${appli.brique}
+			</echo>
+		</then>
+		</if>
+		
+		
+		
+		<!-- le fichier application_fr.properties : Redéfinition des libellés de l'application -->
+		<available file="${parametrage.dir}/application_fr.properties" property="application_fr.properties.present"/>
+		<available file="${exported.dir}/ear/properties/application_fr.properties" property="application_fr.properties.present2"/>
+		<if>
+			<equals arg1="${application_fr.properties.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/application_fr.properties" todir="${exported.dir}/ear/properties" overwrite="true"/>
+		</then>
+		<else>
+			<if>
+				<equals arg1="${application_fr.properties.present2}" arg2="true" />
+			<then>
+				<ant antfile="${script.xml.dir}/majFichier_applicationProperties.xml" inheritall="true">
+					<property name="appli_dir" value="${exported.dir}/ear/properties"/>
+					<property name="appli_langue" value="fr"/>
+					<property name="maj_type" value="REASS"/>
+					<property name="appli_type_env" value="${env.TYPE_ENV}"/>
+					<property name="appli_env" value="${env.ENV}"/>
+				</ant>
+			</then>
+			</if>
+		</else>
+		</if>
+
+		<!-- Ecrasement de logoMiniEfluid.gif -->
+		<available file="${parametrage.dir}/logoMiniEfluid.gif" property="logoMiniEfluid.gif.present"/>
+		<if>
+			<equals arg1="${logoMiniEfluid.gif.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/logoMiniEfluid.gif" todir="${web.dir}/jsp/arc/commun/images/general" overwrite="true"/>
+		</then>
+		</if>
+		
+		<!-- Ecrasement de logoEfluid.gif -->
+		<available file="${parametrage.dir}/logoEfluid.gif" property="logoEfluid.gif.present"/>
+		<if>
+			<equals arg1="${logoEfluid.gif.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/logoEfluid.gif" todir="${web.dir}/jsp/arc/commun/images/general" overwrite="true"/>
+		</then>
+		</if>
+
+		<!-- Ecrasement de accueil.jpg -->
+		<available file="${parametrage.dir}/accueil.jpg" property="accueil.jpg.present"/>
+		<if>
+			<equals arg1="${accueil.jpg.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/accueil.jpg" todir="${web.dir}/jsp/arc/commun/images/general" overwrite="true"/>
+			<echo file="${log.file}" append="true">
+						Ecrasement de accueil.jpg
+			</echo>
+		</then>
+		</if>
+		<!-- Ecrasement de accueil${regie}.jpg -->
+		<echo>accueil${regie}.jpg</echo>
+		<available file="${parametrage.dir}/accueil${regie}.jpg" property="accueilREGIE.jpg.present"/>
+		<if><equals arg1="${accueilREGIE.jpg.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/accueil${regie}.jpg" todir="${web.dir}/jsp/arc/commun/images/general" overwrite="true" />
+			<echo file="${log.file}" append="true">
+						Ecrasement de accueil${regie}.jpg
+			</echo>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+						Pas d'écrasement de accueil${regie}.jpg
+			</echo>
+		</else>
+		</if>
+		
+		
+		<!-- Ecrasement du frameworkCache.properties s'il existe -->
+		<available file="${parametrage.dir}/frameworkCache.properties" property="frameworkCache.properties.present"/>
+		<if>
+			<equals arg1="${frameworkCache.properties.present}" arg2="true" />
+		<then>
+			<copy file="${parametrage.dir}/frameworkCache.properties" todir="${exported.dir}/ear" overwrite="true" />
+			<echo file="${log.file}" append="true">
+					Ecrasement du frameworkCache.properties
+			</echo>
+		</then>
+		</if>
+
+		<!-- Ecrasement des fichiers de déploiements -->
+		<copy todir="${web.dir}/WEB-INF" overwrite="true" >
+			<fileset dir="${parametrage.dir}" includes="weblogic.xml"/>
+		</copy>
+		<!-- màj du fichier web.xml -->
+		<ant antfile="${script.xml.dir}/majFichier_web.xml" inheritall="true">
+			<property name="web_dir" value="${web.dir}/WEB-INF"/>
+			<property name="web_timeout" value="${web_timeout}"/>
+		</ant>
+
+		<available file="${parametrage.dir}/application.xml" property="application.xml.present" />
+		<if>
+			<equals arg1="${application.xml.present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/application.xml" todir="${exported.dir}/ear/META-INF" overwrite="true"/>
+			</then>
+			<else>
+				<!-- Mise à jour du fichier application.xml (mise à jour de l'URI et du context root) -->
+				<echo>
+				${script.xml.dtd.dir}/application_1_3.dtd
+				</echo>
+				<copy file="${exported.dir}/ear/META-INF/application.xml" tofile="${exported.dir}/ear/META-INF/application.xml.old"/>
+				<xmlcatalog id="dtdappli">
+					<dtd publicId="-//Sun Microsystems, Inc.//DTD J2EE Application 1.3//EN" location="${script.xml.dtd.dir}/application_1_3.dtd"/>
+				</xmlcatalog>
+				<xmltask source="${exported.dir}/ear/META-INF/application.xml.old" dest="${exported.dir}/ear/META-INF/application.xml" preservetype="true">
+					<xmlcatalog refid="dtdappli"/>
+					<replace path="application/module/web/web-uri">
+						<![CDATA[
+							<web-uri>${context2bis}.war</web-uri>
+						]]>
+					</replace>
+					<replace path="application/module/web/context-root">
+						<![CDATA[
+							<context-root>${context2bis}</context-root>
+						]]>
+					</replace>
+				</xmltask>
+				<delete file="${exported.dir}/ear/META-INF/application.xml.old"/>
+			</else>
+		</if>
+		
+		<!-- Copie du fichier weblogic-application.xml dans le META-INF de l'EAR -->
+		<available file="${parametrage.dir}/weblogic-application.xml" property="weblogic-application.xml.present" />
+		<if>
+			<equals arg1="${weblogic-application.xml.present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/weblogic-application.xml" toDir="${exported.dir}/ear/META-INF"/>
+			</then>
+		</if>
+		
+		<!-- Mettre à jour les fichiers de deploiementEJB (cluster pour la PROD UEM par exemple) -->
+		<copy todir="${exported.dir}/jar/META-INF" overwrite="true" >
+			<fileset dir="${parametrage.dir}" includes="*-ejb-jar.xml,*.xmi"/>
+		</copy>
+
+		<echo file="${log.file}" append="true">
+			Modification des fichiers de déploiement EJB
+		</echo>
+		
+		<!-- Meise à jour du fichier de deploiement EJB pour le type de serveur d'application concerné -->
+		<!-- ${ejb.deployement.file.name} est valuée dans le fichier appServer.properties -->
+		<for list="${ejb.deployement.file.name}" param="ejb.deployement.file" delimiter=",">
+			<sequential>
+				<propertyregex 	property="@{ejb.deployement.file}.extension" 
+								input="@{ejb.deployement.file}" 
+								regexp="([^\.]*)\.([^\.]*)" 
+								select="\2" />
+				<echo>
+					@{ejb.deployement.file}
+				</echo>
+				<propertycopy name="file.extension" from="@{ejb.deployement.file}.extension"  override="true"/>				
+				<switch value="${file.extension}">
+					<case value="xml">
+						<antcall target="majFichierDeploiementEJB.xml" inheritall="true">
+							<param name="fichierDeploiementEJB" value="${exported.dir}/jar/META-INF/@{ejb.deployement.file}"/>
+						</antcall>
+					</case>
+					<case value="xmi">
+						<antcall target="majFichierDeploiementEJB.xmi" inheritall="true">
+							<param name="fichierDeploiementEJB" value="${exported.dir}/jar/META-INF/@{ejb.deployement.file}"/>
+						</antcall>
+					</case>
+				</switch>
+			</sequential>
+		</for>
+		
+		<!-- ejb-jar.xml -->
+		<copy file="${exported.dir}/jar/META-INF/ejb-jar.xml" tofile="${exported.dir}/jar/META-INF/ejb-jar.xml.old"/>
+		<replace file="${exported.dir}/jar/META-INF/ejb-jar.xml" token='hermesJ2EE' value='${context2bis}' />
+		<delete file="${exported.dir}/jar/META-INF/ejb-jar.xml.old"/>
+		
+		<!-- mise à jour du manifest de l'EJB -->
+		<manifest file="${exported.dir}/jar/META-INF/MANIFEST.MF">
+			<attribute name="Class-Path" value="${context2bis}.jar"/>
+		</manifest>
+
+		<!-- Cryptage des données -->
+		<foreach list="${societes}" target="majFichierParametrageXML" delimiter="," param="societe" inheritall="true"/>
+
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les properties n'ont pas été copiés
+		</echo>
+	</else>
+	</if>
+	</target>
+  
+	<!--
+  *********************************************************************
+  ETAPE 6 : Création de l'EAR de l'application
+  
+  on fait des try-catch sur le renommage de fichiers 
+  pour pouvoir réexécuter à cette étape ou à l'étape d'avant sans devoir tout refaire
+  *********************************************************************
+  -->
+	<target name="makeEar" depends="properties">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 6 : Création de l'EAR de l'application.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeEar.log" action="start" />
+	<if>
+		<equals arg1="${etape6}" arg2="${etapeAutorisee}" />
+	<then>
+	
+		<!-- Renommer le jar de l'application context1.jar en contexte2.jar et adapter le manifest en conséquence -->
+		<trycatch>
+			<try>
+				<move file="${exported.dir}/ear/${context1}.jar" tofile="${exported.dir}/ear/${context2bis}.jar"/>
+			</try>
+			<catch>
+				<available file="${exported.dir}/ear/${context2bis}.jar" property="jar.present"/>
+				<if>
+					<equals arg1="${jar.present}" arg2="false" />
+					<then>
+						<fail message="${exported.dir}/ear/${context2bis}.jar introuvable"/>
+					</then>
+				</if>
+				<echo file="${log.file}" append="true">
+				Le fichier ${context1}.jar a déjà été renommé
+				</echo>
+			</catch>
+		</trycatch>
+		<replaceregexp file="${exported.dir}/jar/META-INF/MANIFEST.MF" match="${context1}" replace="${context2bis}" />
+
+		<!-- constitution de l'EJB de l'appli -->
+		<delete file="${ejb_jar}"/>
+		<jar jarFile="${ejb_jar_new}" manifest="${exported.dir}/jar/META-INF/MANIFEST.MF">
+			<zipfileset dir="${exported.dir}/jar"/>
+		</jar>
+		
+		<!-- Manipulation supplémentaire pour jonas -->
+		<if>
+			<and>
+				<equals arg1="${typeAppServer}" arg2="jonas" />
+			</and>
+			<then>
+			<!-- on met les properties sous forme de jar -->
+			<jar jarFile="${exported.dir}/ear/properties.jar" >
+				<zipfileset dir="${exported.dir}/ear/properties"/>
+			</jar>
+			<delete dir="${exported.dir}/ear/properties"/>
+			
+			<unzip src="${exported.dir}/ear/${context2}.jar"
+			dest="${exported.dir}/jar2">
+			</unzip>
+			<replaceregexp file="${exported.dir}/jar2/META-INF/MANIFEST.MF" match="./properties" replace="properties.jar" />
+			<delete file="${exported.dir}/ear/${context2}.jar"/>
+			<jar jarFile="${exported.dir}/ear/${context2}.jar" manifest="${exported.dir}/jar2/META-INF/MANIFEST.MF">
+				<zipfileset dir="${exported.dir}/jar2"/>
+			</jar>
+			<delete dir="${exported.dir}/jar2" />
+				
+			</then>
+		</if>
+		
+		<!-- pré-déploiement de l'ejb pour jonas -->
+		<echo file="${log.file}" append="true">
+				typeAppServer = ${typeAppServer}
+				genIC.deploy = ${genIC.deploy}
+				</echo>
+		<if>
+			<and>
+				<equals arg1="${typeAppServer}" arg2="jonas" />
+				<equals arg1="${genIC.deploy}" arg2="${oui}" />
+			</and>
+			<then>
+
+				<path id="project.class.path">
+					<fileset dir="${exported.dir}/ear">
+						<include name="*.jar"/>
+					</fileset>
+					<fileset dir="${jonas.root}">
+						<include name="*.jar"/>
+					</fileset>
+				</path>
+				
+				<!--E:\programs\jonas-root-511\bin\GenIC.bat -classpath ./framework.jar businessController.jar-->
+				<!--<genic keepgenerated="true"  protocols="jeremie, jrmp, iiop, cmi" verbose="true">-->
+				<if>
+						<equals arg1="${ejb.type}" arg2="EJBStateless"/>
+					<!-- Cas par défaut : ce sera l'EJB statefull qui sera ajouté à l'ear -->
+					<then>
+						<genic keepgenerated="true" protocols="jrmp"> 
+							<classpath refid="project.class.path"/>
+							<fileset dir="${exported.dir}/ear">
+								<include name="businessControllerStatelessCMT.jar" />
+							</fileset>
+						</genic>						
+					</then>
+					<!-- Sinon on ajoute l'EJB indiqué dans la valeur de la property ejb.type -->
+					<else>
+						<genic keepgenerated="true" protocols="jrmp"> 
+							<classpath refid="project.class.path"/>
+							<fileset dir="${exported.dir}/ear">
+								<include name="businessController.jar" />
+							</fileset>
+						</genic>
+					</else>
+				</if>
+				
+			</then>
+		</if>
+
+		<!-- copie des librairies supplémentaires -->
+		<copy todir="${exported.dir}/ear" overwrite="true" flatten="true">
+			<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques}"/>
+		</copy>
+		
+		
+		<!-- constitution du WAR de l'appli 
+				Suppression de l'aide en ligne si demandé
+				modification du classpath dans le manifest pour tenir compte du changement de nom dans le contexte
+		-->
+		<delete file="${exported.dir}/ear/${context1}.war"/>
+		<if>				
+			<equals arg1="${build.war}" arg2="${oui}" />
+			<then>
+				<if>
+					<not><equals arg1="${deployHelp}" arg2="${oui}" /></not>
+					<then>
+						<delete dir="${exported.dir}/war/${Help.dir}"/>
+					</then>
+				</if>
+				<replaceregexp file="${exported.dir}/war/META-INF/MANIFEST.MF" match="${context1}" replace="${context2bis}" />
+
+				<war warfile="${app_war}" webxml="${exported.dir}/war/WEB-INF/web.xml" manifest="${exported.dir}/war/META-INF/MANIFEST.MF">
+					<zipfileset dir="${exported.dir}/war"/>
+				</war>
+			</then>
+		</if>
+
+		<!-- constitution de l'EAR de l'appli 
+				 modification du classpath dans le manifest pour tenir compte du changement de nom dans le contexte
+		-->
+		<delete file="${app_ear}"/>
+		<replaceregexp file="${exported.dir}/ear/META-INF/MANIFEST.MF" match="${context1}" replace="${context2bis}" />
+		<ear earfile="${app_ear}" appxml="${exported.dir}/ear/META-INF/application.xml">
+			<zipfileset dir="${exported.dir}/ear"/>
+		</ear>
+		
+		<!-- nettoyage des sous-répertoires -->
+		<delete dir="${exported.dir}/ear"/>
+		<delete dir="${exported.dir}/jar"/>
+		<delete dir="${exported.dir}/war"/>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier EAR n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	<record name="${log.dir}/makeEar.log" action="stop" />
+	</target>
+
+	<target name="make">
+		<antcall target="makeEar"/>
+	</target>
+
+</project>

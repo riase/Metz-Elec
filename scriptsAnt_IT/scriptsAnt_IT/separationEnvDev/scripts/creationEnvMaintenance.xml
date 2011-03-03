@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="creationEnvMaintenance" default="migration" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+
+	<!-- 
+	*********************************************************************
+	Parametre d'entree :
+	  env.version : version de l'environnement (4_0)
+		cvs.login.old : login utilisé pour récupérer l'environnement lors de la création duzip
+	*********************************************************************
+	-->
+
+
+	<property name="root" value="${basedir}"/>
+  <property name="Developpement_dev.zip" value="{root}\developpement_dev.zip"/>
+  <property name="HermesArchi.zip" value="{root}\developpement_dev.zip"/>
+
+  <property name="module.dev" value="Developpement"/>
+  <property name="module.archi" value="HermesArchi"/>
+
+
+  <!--
+	*********************************************************************
+		Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+    <if>
+			<equals arg1="${env.version}" arg2="$${env.version}" />
+			<then>
+        <input message="Quelle version voules-vous récupérer (ex : 3_0)?" addproperty="env.version" />
+      </then>
+    </if>
+    <if>
+			<equals arg1="${project.disk}" arg2="$${project.disk}" />
+			<then>
+        <input message="Quel est le disque sur lequel se trouve votre répertoire java\projets?"
+             addproperty="project.disk" validargs="C,D,E,F"/>
+      </then>
+    </if>
+    <property name="project.dir" value="${project.disk}:\java\projets"/>
+  	<if>
+			<equals arg1="${checkout.name}" arg2="$${checkout.name}" />
+			<then>
+        <input message="Quel module voulez-vous récupérer?"
+           addproperty="checkout.name" validargs="${module.dev},${module.archi}"/>
+      </then>
+    </if>
+    <property name="zip.name" value="${root}\${env.version}\${checkout.name}_${env.version}.zip"/>
+    <property name="env.dir" value="${project.dir}\${checkout.name}_${env.version}"/>
+    <property name="log.dir" value="${env.dir}"/>
+    <mkdir dir="${log.dir}"/>
+    <input message="Quel est votre login cvs?"
+           addproperty="cvs.login.new" />
+    <property name="log.file" value="${log.dir}\creationEnvMaintenance_${env.version}.log"/>
+    <record name="${log.file}" action="start"/>
+
+		<echo>
+*********************************************************************
+Lancement du script de creation de l'environnement ${env.version} pour le module ${checkout.name}
+*********************************************************************
+		Repertoire du projet : ${env.dir}
+    Login CVS : ${cvs.login.new}
+    </echo>
+		<record name="${log.file}" action="stop"/>
+	</target>
+
+
+	<!--
+	*********************************************************************
+		Migration
+	*********************************************************************
+	-->
+	<target name="migration" depends="init">
+		<record name="${log.file}" action="start" append="yes"/>
+		<echo>
+*********************************************************************
+Creation de l'environnement local....
+*********************************************************************
+		</echo>
+    <unzip src="${zip.name}" dest="${env.dir}" />
+
+    <echo>
+*********************************************************************
+Modification user CVS....
+*********************************************************************
+		</echo>
+    <replace dir="${env.dir}" token="${cvs.login.old}" value="${cvs.login.new}" summary="yes" defaultexcludes="no">
+			<include name="**/CVS/Root"/>
+		</replace>
+
+    <antcall target="lectureSeule"/>
+    <if>
+      <equals arg1="${checkout.name}" arg2="${module.dev}"/>
+      <then>
+        <antcall target="envJBuilder"/>
+      </then>
+    </if>
+    <record name="${log.file}" action="stop"/>
+	</target>
+
+  <target name="lectureSeule" depends="init">
+    <echo>
+*********************************************************************
+Mise en lecture seule....
+*********************************************************************
+		</echo>
+    <apply executable="attrib" parallel="false">
+      <arg value="+R"/>
+      <fileset dir="${env.dir}"/>
+    </apply>
+
+  </target>
+
+  <target name="envJBuilder" depends="init">
+    <echo>
+*********************************************************************
+Preparation environemment JBuilder ....
+      - copie properties
+      - copie projet JBuilder
+*********************************************************************
+		</echo>
+    <copy todir="${env.dir}\hermes\src">
+      <fileset dir="${env.dir}\hermes\properties" includes="*.properties"/>
+    </copy>
+    <copy file="${env.dir}\hermes\modele\ModeleProjet.jpx" tofile="${env.dir}\hermes\hermes_${env.version}.jpx"/>
+    <apply executable="attrib" parallel="false">
+      <arg value="-R"/>
+      <fileset dir="${env.dir}\hermes\src" includes="framework.properties,framework2.properties,hermes2.properties"/>
+      <fileset dir="${env.dir}\hermes" includes="${env.dir}\hermes\hermes_${env.version}.jpx" />
+    </apply>
+
+  </target>
+
+</project>

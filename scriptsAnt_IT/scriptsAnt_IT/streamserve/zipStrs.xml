@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="zipStrS" default="make" basedir="../.">
+
+  <!-- ********************************************************************************* -->
+  <!-- Ce script permet de packager les sources Streamserve, il est obligatoirement appelé par le script assemblageStrS.xml
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES (les contrôles sur ces paramètres obligatoires sont effectués dans le fichier appelant (assemblageStrS.xml))
+		build.ss.dir : chemin complet vers le répertoire temporaire où se trouve le checkout des sources streamserve
+		contexte : nom du contexte à packager (ex.: produit, EDFSEI, GEDIA, EDFSEIExport_calcul...)
+		lot : nom du lot (ex.: lot80)
+		exported.dir : chemin complet vers le répertoire streamserve
+		log.dir : chemin complet vers le répertoire contenant les fichiers de log de la tâche courante
+		log.file : nom du fichier de log												-->
+  <!-- ********************************************************************************* -->
+
+  <!-- Ajout d'un package pour utiliser le task IF -->
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+  
+  <target name="zipStrs" depends="">
+	<!-- Insertion d'un fichier version.txt -->
+	<var name="version.file" value="${build.ss.dir}/version.txt"/>
+	<echo file="${version.file}" append="true">
+		Name: efluid
+		Version: ${cvs.tag}
+		Vendor: UEM - CGI
+		Built-Date: ${TODAY_UK}
+	</echo>
+	
+	<!-- Nom du zip -->
+	<if>
+		<equals arg1="${contexte}" arg2="produit" />
+	<then>
+		<var name="zip.nom" value="streamserve${lot}.zip" />
+	</then>
+	<else>
+		<var name="zip.nom" value="streamserve${contexte}${lot}.zip" />
+	</else>
+	</if>
+	
+	<!-- constitution du zip -->
+	<delete file="${exported.dir}/${zip.nom}"/>
+	<zip destfile="${exported.dir}/${zip.nom}">
+		<zipfileset dir="${build.ss.dir}"/>
+	</zip>
+	
+	<record name="${log.dir}/makeZip${contexte}.log" action="stop" />
+	
+	<echo file="${log.file}" append="true">
+		OK
+	</echo>
+  </target>
+				
+  <target name="make">
+		<antcall target="zipStrs"/>
+  </target>
+</project>

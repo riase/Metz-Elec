@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="taggerCode" default="make" basedir="../.">
+
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+  <!--
+	*********************************************************************
+   Ce sript permet de mettre un label ("tag") sur les sources d'un module dans CVS
+
+ 	 Avant de tagger une mise à jour de la copie locale est faite (par un nouveau checkout)
+
+   Ce script attend en paramètre :
+
+  	 OBLIGATOIRES
+  	 cvs.tag : nom du tag à mettre sur les sources
+
+	 	 FACULTATIFS
+  	 cvs.login : nom du user pour la connexion à CVS. Par défaut ce
+  	 					paramètre vaut adminDev
+
+  	 cvs.server : nom du serveur sur lequel se trouve la base CVS. Par
+  	 					défaut vaut l'adresse IP de lausanne (10.160.242.41)
+
+  	 cvs.repo : nom du repository CVS. Par défaut DEV
+
+  	 cvs.branch : nom de la branche. Par défaut pas de branche
+
+  	 cvs.date : date de la prise des sources (ex : "1998-3-24 20:55" cf update wincvs pour le format).
+  	 							Par défaut pas de date => la dernière version dans la branche)
+
+  	 etape : etape de démarrage du script. Pas de valeur par défaut
+  	 				(=> on commence donc par la première	étape)
+
+  Avant de lancer le script fixer les paramètres d'environnement.
+	La chaîne de lancement est par exemple :
+
+	set JAVA_HOME=D:\java\softs\jdk1.3.1_03
+	set ANT_HOME=D:\java\softs\ant\apache-ant-1.5.3-1
+	set PATH=%PATH%;%ANT_HOME%\bin;%JAVA_HOME%\bin
+
+	ant -f taggerCode.xml -Dcvs.tag=LIV_2_1_18
+		 [ -Dcvs.user=mrabti_s  -Dcvs.serveur=lausanne -Dcvs.repo=DEV -Dcvs.branche=HERMES_3_0 -Detape=2 ]
+
+	*********************************************************************
+	-->
+  
+  <!-- propriétés pour le déroulement des étapes du script -->
+  <property name="etapeAutorisee" value="autorisee"/>
+  <property name="etapeNonAutorisee" value="nonAutorisee"/>
+
+
+  <!-- initialisation -->
+  <target name="init" depends="">
+  
+  	<!-- ExecDir -->
+		<if>
+		<not><isset property="${execDir}"/></not>
+		<then>
+		<property name="execDir" value="${basedir}"/>
+		</then>
+		</if>
+		<property name="root" value="${execDir}"/>
+	  
+		<!-- xmlCommunDir -->
+		<if>
+			<not><isset property="${xmlCommunDir}"/></not>
+		<then>
+			<property name="xmlCommunDir" value="${basedir}/scripts"/>
+		</then>
+		</if>
+		<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+	
+		<property name="temp.dir" value="${root}/tmpTag"/>
+  	<property name="cvs.dir" value="${temp.dir}\Source"/>
+
+    <buildnumber file="${root}\build.number"/>
+    <tstamp>
+      <format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+    </tstamp>
+    
+  <property name="log.dir" value="${temp.dir}\log.${build.number}"/>
+  <property name="log.file" value="${log.dir}\tagger.log"/>
+
+   	<!-- creation du répertoire et du fichier de log général -->
+	<mkdir dir="${log.dir}"/>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+			Lancement du script de pose de tag sur les sources
+		*********************************************************************
+		</echo>
+	<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+	<if>
+		<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+	<then>
+		<property name="property.file.dir" value="scripts"/>
+	</then>
+	</if>
+	<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+	<if>
+		<equals arg1="${property.file.present}" arg2="true" />
+		<then>
+			<echo file="${log.file}" append="true">
+	Utilisation du fichier ${property.file}
+			</echo>
+			<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+		Pas de fichier de propriétés dans ${root}\${property.file.dir}
+			</echo>
+		</else>
+	</if>
+
+		<!-- Chaîne de connexion à la base CVS -->
+		<if>
+			<not><isset property="${cvs.login}"/></not>
+			<then>
+				<property name="cvs.login" value="adminDev"/>
+			</then>
+		</if>
+		<if>
+			<not><isset property="${cvs.repo}"/></not>
+			<then>
+				<property name="cvs.repo" value="DEV"/>
+			</then>
+		</if>
+		<if>
+			<not><isset property="${cvs.server}"/></not>
+			<then>
+				<property name="cvs.server" value="10.1.1.29"/>
+			</then>
+		</if>
+
+		<property name="cvs.root" value=":pserver:${cvs.login}@${cvs.server}:${cvs.repo}"/>
+
+		<if>
+			<not><isset property="${cvs.date}"/></not>
+			<then>
+				<property name="cvs.date" value=""/>
+			</then>
+		</if>
+
+		<if>
+			<not><isset property="${cvs.branch}"/></not>
+			<then>
+				<property name="cvs.branch" value=""/>
+			</then>
+		</if>
+
+
+		<echo file="${log.file}" append="true">
+			Chaine de connexion à CVS : ${cvs.root}
+			branch="${cvs.branch}"
+			date="${cvs.date}"
+		</echo>
+
+   		<!--Etapes du scripts. A executer dans l'ordre -->
+		<echo file="${log.file}" append="true">
+			Etape de démarrage du script : ${etape}
+		</echo>
+		<switch value="${etape}">
+			<case value="2">
+				<property name="etape1" value="${etapeNonAutorisee}" />
+			</case>
+			<default>
+				<echo file="${log.file}" append="true">
+				=> Cas par défaut. Toutes les étapes du script seront exécutées
+				</echo>
+			</default>
+		</switch>
+		<!--
+			les property qui n'auraient pas été valuées précédemment le sont à présent.
+			La valeur mise fait en sorte que l'étape est autorisée.
+		-->
+		<property name="etape1" value="${etapeAutorisee}"/>
+		<property name="etape2" value="${etapeAutorisee}"/>
+
+  </target>
+
+
+	<!--
+	*********************************************************************
+	Etape 1 : checkout CVS
+ 	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="init">
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			Etape 1 : Checkout des modules demandés
+		 	*********************************************************************
+		</echo>
+		<if>
+	 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	 		<then>
+				<delete dir="${cvs.dir}"/>
+				<mkdir dir="${cvs.dir}"/>
+				
+				<!--Récupération du nom des modules à tagger-->		
+				<for list="${cvs.modules.tag}" delimiter="," param="data">
+					<sequential>			    
+						<!-- checkout -->
+						<echo file="${log.file}" append="true">
+							Checkout de @{data}
+						</echo>
+		
+						<cvs tag="${cvs.branch}" date="${cvs.date}" cvsRoot="${cvs.root}" package="@{data}" dest="${cvs.dir}" command="checkout" />
+						<echo file="${log.file}" append="true">
+							La version a été récupérée
+						</echo>
+					</sequential>
+				</for>
+			</then>
+		</if>
+	</target>
+  
+  <!--
+	*********************************************************************
+	Etape 2 : Tag
+ 	*********************************************************************
+	-->
+	<target name="tag" depends="getFromCVS">
+		<echo file="${log.file}" append="true">
+			*********************************************************************
+			Etape 2 : Tag des modules demandés
+		 	*********************************************************************
+		</echo>
+		<if>
+	 		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	 		<then>		    		
+				<!--Récupération du nom des modules à tagger-->		
+				<for list="${cvs.modules.tag}" delimiter="," param="data">
+					<sequential>			    
+						<!-- pose du tag-->						
+						<cvs cvsRoot="${cvs.root}" dest="${cvs.dir}\@{data}" command="tag ${cvs.tag}"/>
+						
+						<echo file="${log.file}" append="true">
+							Pose du tag OK sur :
+							@{data}
+						</echo>
+					</sequential>
+				</for>
+			</then>
+		</if>
+	</target>
+  
+  <target name="make">
+    <antcall target="tag"/>
+  </target>
+</project>

@@ -1,0 +1,614 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="reAssemblageBatch" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+	<!-- Ajout d'un package pour utiliser le task XML -->
+	<taskdef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"/>
+	
+	<!-- Ajout d'un package pour utiliser le task unset -->
+	<taskdef name="unset" classname="ise.antelope.tasks.Unset"/>
+
+
+	<!-- *********************************************************************
+	Ce script permet de paramétrer les batchs avant déploiement.
+
+	Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+		
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+	cvs.basemodule : nom COMPLET du module de base CVS à récupérer contenant les livraisons (ex : assemblage)
+
+	cvs.type : permet de déterminer le type de packaging en fonction de l'environnement CVS
+							d'origine et l'environnement Weblogic de destination
+							(valeurs : 'devint' pour un transfert de Developpement_dev\Hermes vers Chablis\...\DCLISA,
+							'intint', 'intrec', 'recrec', 'mtcpro')
+
+	cvs.lot : lot du module à récupérer (Lot2 par ex). Il s'agit du nom du répertoire du lot dans CVS int 
+
+	cvs.tag : version du module à récupérer (LIV_2_1_14 par ex).  Il s'agit du nom du répertoire de la livraison dans CVS int
+
+	context1 : un nom de l'application archivé (= sous répertoire CVS)
+							exemple : hermesSP1
+							valeur par défaut : hermes
+
+	context2 : nom du contexte de paramétrage du batch (= sous répertoire du paramétrage)
+						Utilisé aussi pour constituer les noms des fichers zip.
+						valeur par défaut : batchsefluid
+
+	OPTIONNELS
+	etape : etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+	source.versionCVS : nom du tag posé sur le source. Par défaut = LAST (dernière version archivée dans INT)
+	deploy : "Y" pour déployer l'application sur le serveur Weblogic.
+						Si pas de valeur ou une valeur autre que Y on ne déploie pas.
+						(comportement par défaut).
+						
+	regie : "RSEIPC", "GEDIA" pour modifier les utilisateurs batchs B-GF-UEM par B-GF-RSEIPC (resp B-GF-GEDIA)
+	
+	versionOracle : version oracle (pour insérer le bon driver jdbc). Par défaut 9.2.0.5.
+	jdbc.jar : nom du fichier jar du driver jdbc. Par défaut ojdbc14.jar
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f assemblageBatch.xml -Dcvs.basemodule=assemblage -Dcvs.type=intrec -Dcvs.tag=LIV_2_1_14 -Dcvs.lot=LOT2.1 -Dcontext1=hermesSP1 -Dcontext2=hermesMOA2114
+		 [ -Detape=1 -Ddeploy=Y -Dregie=RSEIPC -DversionOracle=9.2.0.1]
+
+
+	Pour que le script fonctionne, le répertoire de paramétrage (${parametrage.dir})
+	doit contenir les ressources suivantes :
+
+		fichiers properties :
+			framework2.properties
+			hermes2.properties
+			EDK2.properties
+			
+		fichiers xml
+			uem.xml, gedia.xml ou reseipc.xml
+
+	*********************************************************************
+	-->
+
+  <!-- propriétés pour le déroulement des étapes du script -->
+  <property name="etapeAutorisee" value="autorisee"/>
+  <property name="etapeNonAutorisee" value="nonAutorisee"/>
+
+	<target name="majFichierParametrageXML">
+		<!-- le fichier xml est éventuellement spécifique à l'environnement cible -->
+		<available file="${parametrage.dir}/${societe}.xml" property="present" />
+		<if>
+			<equals arg1="${present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/${societe}.xml" todir="${exported.dir}/zip/batchsefluid/classes" overwrite="true" />
+				<echo file="${log.file}" append="true">
+					Le fichier ${societe}.xml a été écrasé
+				</echo>
+			</then>
+		</if>
+		
+		<!-- verification de l'existence du fichier -->
+		<available file="${exported.dir}/zip/batchsefluid/classes/${societe}.xml" property="present.societe" />
+		<if>
+			<equals arg1="${present.societe}" arg2="true" />
+			<then>
+				<echo file="${log.file}" append="true">
+					Le fichier ${societe}.xml a été récupéré dans ${exported.dir}/zip/batchsefluid/classes/
+				</echo>
+			</then>
+			<else>
+				<!-- il faut aller le chercher dans le jar -->
+				<unzip src="${exported.dir}/zip/batchsefluid/lib/${context1}Batch.jar"
+					dest="${exported.dir}/jar">
+				</unzip>
+				<copy file="${exported.dir}/jar/${societe}.xml" todir="${exported.dir}/zip/batchsefluid/classes" overwrite="true" />
+				<!-- nettoyage -->
+				<delete dir="${exported.dir}/jar"/>
+				<echo file="${log.file}" append="true">
+					Le fichier ${societe}.xml a été récupéré dans ${context1}Batch.jar
+				</echo>
+			</else>
+		</if>
+
+		<!-- les paramètres Saturne/Diva du fichier xml sont spécifiques à l'environnement cible.
+					Et ils doivent être cryptés -->
+		<ant antfile="${script.xml.dir}/majFichierParametrageXML.xml" inheritall="true">
+			<property name="XML.societe" value="${societe}"/>
+			<property name="XML.properties.dir" value="${exported.dir}/zip/batchsefluid/classes"/>
+		</ant>
+
+	</target>
+
+
+
+  <!--
+  *********************************************************************
+  	Initialisations
+  *********************************************************************
+  -->
+  <target name="init" depends="">
+
+	<!-- ExecDir -->
+	<if>
+		<not><isset property="${execDir}"/></not>
+	<then>
+			<property name="execDir" value="${basedir}"/>
+	</then>
+	</if>
+	<property name="root" value="${execDir}"/>
+
+	<!-- xmlCommunDir -->
+	<if>
+		<not><isset property="${xmlCommunDir}"/></not>
+	<then>
+		<property name="xmlCommunDir" value="${basedir}/scripts"/>
+	</then>
+	</if>
+	<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+
+	<property name="temp.dir" value="${root}/tmplivraisons"/>
+	<property name="livraisons.dir" value="${root}/../livraisons"/>
+	<property name="cvs.dir" value="${temp.dir}/projet"/>
+	<property name="projet.dir" value="${cvs.dir}"/>
+	<property name="script.xml.dir" value="${root}/scripts"/>
+
+	<property name="resources.dir" value="${root}/parametrage/batch"/>
+
+	<!--
+	*********************************************************************
+	Le répertoire de log et le fichier log du script
+	*********************************************************************
+	-->
+		<buildnumber file="${basedir}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+	<property name="log.dir" value="${temp.dir}/log.${build.number}"/>
+	<property name="log.file" value="${log.dir}/reassemblageBatch.log"/>
+	<property name="properties.dir" value="${root}/properties"/>
+
+  	<!-- creation du répertoire et du fichier de log général -->
+  	<delete dir="${log.dir}"/>
+		<mkdir dir="${log.dir}"/>
+
+		<echo file="${log.file}" append="true">
+		*********************************************************************
+			Lancement du script de réassemblage des batchs
+		*********************************************************************
+		property.file=${property.file}
+		</echo>
+
+	<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+	<if>
+		<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+	<then>
+		<property name="property.file.dir" value="scripts"/>
+	</then>
+	</if>
+	<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+	<if>
+		<equals arg1="${property.file.present}" arg2="true" />
+		<then>
+			<echo file="${log.file}" append="true">
+	Utilisation du fichier ${property.file}
+			</echo>
+			<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+		Pas de fichier de propriétés dans ${root}\${property.file.dir}
+			</echo>
+		</else>
+	</if>
+
+	<!--
+	  *********************************************************************
+		le résultat du script se trouve dans le répertoire exported.dir.
+		Il s'agit de : un zip
+
+		Seul le fichier zip doit être déployé
+	  *******************************************************************
+	-->
+	
+	<if>
+		<not><isset property="${context1}"/></not>
+	<then>
+		<property name="context1" value="hermes"/>
+	</then>
+	</if>
+	
+	
+	<if>
+		<not><isset property="${context2}"/></not>
+	<then>
+		<property name="context2" value="batchsefluid"/>
+	</then>
+	</if>
+	
+	
+	<property name="exported.dir" value="${root}/batch/${context2}"/>
+	<property name="parametrage.dir" value="${resources.dir}/${context2}"/>
+	<property name="projet.j2ee.dir" value="${cvs.dir}/${cvs.basemodule}/${cvs.lot}/${cvs.tag}/j2ee/batch/${context1}"/>
+	<property name="module.dir" value="j2ee/batch/${context1}"/>
+
+	<!-- les ressources particulières -->
+	
+	<!-- si context2bis=context2 ou context2 sans son sous-répertoire -->
+	<basename property="context2bis" file="${exported.dir}/${context2}"/>
+	
+	<property name="batch_zip" value="${context2bis}Batch.zip"/>
+
+
+	<!-- driver jdbc -->
+	<if>
+		<not><isset property="${versionOracle}"/></not>
+	<then>
+		<property name="versionOracle" value="9.2.0.5"/>
+	</then>
+	</if>
+	<property name="oracle.home" value="I:/Oracle/${versionOracle}"/>
+
+	<if>
+		<not><isset property="${jdbc.jar}"/></not>
+	<then>
+		<property name="jdbc.jar" value="ojdbc14.jar"/>
+	</then>
+	</if>
+
+		<!-- librairies à inclure -->
+		<if>
+			<not><isset property="${librairies.specifiques}"/></not>
+			<then>
+				<property name="librairies.specifiques" value="${none}"/>
+			</then>
+			<else>
+				<!-- le répetoire doit être indiqué dans ce cas -->
+				<if>
+					<not><isset property="${librairies.specifiques.dir}"/></not>
+					<then>
+						<fail message="le paramètre librairies.specifiques.dir est obligatoire"/>
+					</then>
+				</if>
+			</else>
+		</if>
+		<if>
+			<not><isset property="${librairies.specifiques.classpath}"/></not>
+			<then>
+				<property name="librairies.specifiques.classpath" value="${none}"/>
+			</then>
+		</if>
+		<echo file="${log.file}" append="true">
+			librairies.specifiques = ${librairies.specifiques}
+			librairies.specifiques.dir = ${librairies.specifiques.dir}
+			librairies.specifiques.classpath = ${librairies.specifiques.classpath}
+		</echo>
+
+
+	<!--Etapes du scripts. A executer dans l'ordre -->
+	<echo file="${log.file}" append="true">
+		Etape de démarrage du script : ${etape}
+	</echo>
+	<switch value="${etape}">
+		<case value="2">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="3">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="4">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+		</case>
+		<case value="5">
+			<property name="etape1" value="${etapeNonAutorisee}"/>
+			<property name="etape2" value="${etapeNonAutorisee}"/>
+			<property name="etape3" value="${etapeNonAutorisee}"/>
+			<property name="etape4" value="${etapeNonAutorisee}"/>
+		</case>
+		<default>
+			<echo file="${log.file}" append="true">
+				=> Cas par défaut. Toutes les étapes du script seront exécutées
+			</echo>
+		</default>
+	</switch>
+	<!--
+	les property qui n'auraient pas été valuées précédemment le sont à présent.
+	La valeur mise fait en sorte que l'étape est autorisée.
+	-->
+	<property name="etape1" value="${etapeAutorisee}"/>
+	<property name="etape2" value="${etapeAutorisee}"/>
+	<property name="etape3" value="${etapeAutorisee}"/>
+	<property name="etape4" value="${etapeAutorisee}"/>
+	<property name="etape5" value="${etapeAutorisee}"/>
+
+		<!-- récuperation du paramétrage XML spécifique à la PF-->
+		<available file="${parametrage.dir}/parametrageXML.properties" property="parametrageXML.present" />
+		<if>
+			<equals arg1="${parametrageXML.present}" arg2="true" />
+			<then>
+				<loadproperties srcFile="${parametrage.dir}/parametrageXML.properties"/>
+			</then>
+			<else>
+				<fail message="le fichier ${parametrage.dir}/parametrageXML.properties est introuvable"/>
+			</else>
+		</if>
+
+	</target>
+
+
+  <!--
+  *********************************************************************
+  ETAPE 1
+
+  Création d'une copie locale de la livraison issue de l'intégration
+
+  *********************************************************************
+  -->
+  <target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+ 			ETAPE 1 : Récupération de la livraison depuis CVS
+		*********************************************************************
+		module.dir = ${module.dir}
+	</echo>
+	<if>
+ 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+		<if>
+			<not><isset property="source.versionCVS"/></not>
+		<then>
+			<property name="source.versionCVS" value="LAST"/>
+		</then>
+		</if>
+		
+		<ant antfile="${script.xml.commun.dir}/getCibleFromCVS.xml" inheritall="true">
+			<property name="cvs.module" value="${module.dir}"/>
+			<property name="CvsProjetDir" value="${cvs.dir}"/>
+			<property name="CvsVersion" value="${source.versionCVS}"/>
+		</ant>
+		
+		<echo file="${log.file}" append="true">
+			La version ${cvs.tag} a été récupérée
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les binaires de l'application ${module.dir} n'ont pas été récupérés
+		</echo>
+	</else>
+	</if>
+
+  </target>
+
+  
+  <!--
+  *********************************************************************
+  ETAPE 2 :   	Unzip des binaires.
+   ********************************************************************
+  -->
+  <target name="unzip" depends="getFromCVS">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 2 : Unzip des binaires.
+		 *********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+	<then>
+		<!-- <delete dir="${exported.dir}/zip"/> -->
+		<!-- <mkdir dir="${exported.dir}/zip"/> -->
+		
+		<trycatch>
+			<try>
+				<mkdir dir="${exported.dir}/zip"/>
+			</try>
+			<catch>
+				<delete>
+					<fileset dir="${exported.dir}/*.zip"/>
+				</delete>
+			</catch>
+		</trycatch>
+		
+		
+		<unzip	src="${projet.j2ee.dir}/${context1}Batch.zip"
+			dest="${exported.dir}/zip">
+		</unzip>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les binaires n'ont pas été dézippés
+		</echo>
+	</else>
+	</if>
+  </target>
+
+ <!--
+  *********************************************************************
+  ETAPE 3 :    Ajout des modules supplémentaires
+   ********************************************************************
+  -->
+  <target name="moduleSupplementaire" depends="unzip">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 3 : Ajout des modules supplémentaires
+		 *********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+	<then>
+		<ant antfile="${script.xml.dir}/reassemblageBatchModuleSupplementaire.xml" inheritall="true">
+			<property name="tmp.zip.batch.dir" value="${exported.dir}/zip/batchsefluid/lib" />
+		</ant>
+	</then>
+	</if>
+  </target>
+  
+  <!--
+  *********************************************************************
+  ETAPE 4 :    écrasement des fichiers de paramétrage.
+   ********************************************************************
+  -->
+  <target name="properties" depends="moduleSupplementaire">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 4 : écrasement des fichiers de paramétrage.
+		 *********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+	<then>
+		<!-- le fichier framework2.properties est spécifique à l'environnement cible -->
+		<delete file="${exported.dir}/zip/batchsefluid/classes/framework2.properties"/>
+		<copy file="${parametrage.dir}/framework2.properties" todir="${exported.dir}/zip/batchsefluid/classes"/>
+
+		<!-- le fichier Hermes2.properties est spécifique à l'environnement cible -->
+		<delete file="${exported.dir}/zip/batchsefluid/classes/hermes2.properties"/>
+		<copy file="${parametrage.dir}/hermes2.properties" todir="${exported.dir}/zip/batchsefluid/classes"/>
+		
+		<!-- le fichier EDK2.properties est spécifique à l'environnement cible-->
+		<available file="${parametrage.dir}/EDK2.properties" property="EDK2.properties.present" />
+		<if>
+			<equals arg1="${EDK2.properties.present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/EDK2.properties" todir="${exported.dir}/zip/batchsefluid/classes"/>
+			</then>
+		</if>
+
+		<!-- le fichier setEnvBatch.cmd est spécifique à l'environnement cible -->
+		<available file="${parametrage.dir}/setEnvBatch.cmd" property="setEnvBatch.cmd.present"/>
+		<if>
+ 			<equals arg1="${setEnvBatch.cmd.present}" arg2="true" />
+		<then>
+			<delete file="${exported.dir}/zip/batchsefluid/scripts/setEnvBatch.cmd"/>
+			<copy file="${parametrage.dir}/setEnvBatch.cmd" todir="${exported.dir}/zip/batchsefluid/scripts"/>
+		</then>
+		</if>
+
+		<!-- Cryptage des données -->
+		<foreach list="${societes}" target="majFichierParametrageXML" delimiter="," param="societe" inheritall="true"/>
+
+		<!-- remommage des clauses de confidentialité dans les scripts -->
+		<!-- remplacer -UEM par -RSEIPC ou -GEDIA -->
+		
+		<if>
+			<isset property="regie"/>
+		<then>
+			<replace dir="${exported.dir}/zip/batchsefluid/scripts" token="-UEM" value="-${regie}">
+				<include name="**/*.cmd"/>
+			</replace>
+		</then>
+		</if>
+
+
+		<!-- Ecrasement du driver JDBC -->
+		<delete file="${exported.dir}/zip/batchsefluid/lib/${jdbc.jar}"/>
+		<copy file="${oracle.home}/${jdbc.jar}" todir="${exported.dir}/zip/batchsefluid/lib"/>
+		<echo file="${log.file}" append="true">
+			driver jdbc : ${oracle.home}/${jdbc.jar}
+		</echo>
+		
+		<!-- copie des librairies supplémentaires -->
+		<if>
+			<not><equals arg1="${librairies.specifiques}" arg2="${none}"/></not>
+			<then>
+				<copy todir="${exported.dir}/zip/batchsefluid/lib" overwrite="true" flatten="true">
+					<fileset dir="${librairies.specifiques.dir}" includes="${librairies.specifiques}"/>
+				</copy>
+			</then>
+		</if>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+
+	
+	<echo>gestionParametrageCentralise = ${gestionParametrageCentralise}</echo>
+	
+		<!-- Modification paramétrage -->
+		<if>
+			<equals arg1="${gestionParametrageCentralise}" arg2="true" />
+		<then>
+			<if>
+				<not>
+					<isset property="params.file"/>
+				</not>
+				<then>
+					<property name="params.file" value="parametrage${appli.type}.properties"/>
+				</then>
+			</if>
+				
+			<ant antfile="${script.xml.commun.dir}/parametrageFichier.xml" inheritall="true">
+				<property name="source.dir" value="${exported.dir}/zip"/>
+				<property name="cible.dir" value="${exported.dir}/zip"/>
+				<property name="params.dir" value="${parametrage.dir}"/>
+				<property name="appli.brique" value="zip" />
+			</ant>
+		</then>
+		</if>
+		
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les properties n'ont pas été copiés
+		</echo>
+	</else>
+	</if>
+  </target>  
+  <!--
+  *********************************************************************
+  ETAPE 5 : Création du zip des batchs
+  *********************************************************************
+  -->
+  <target name="makeZip" depends="properties">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 5 :	Création des batchs.
+		*********************************************************************
+	</echo>
+	<record name="${log.dir}/makeZip.log" action="start" />
+	<if>
+		<equals arg1="${etape5}" arg2="${etapeAutorisee}" />
+	<then>
+	
+		<!-- constitution du zip des batchs -->
+		<delete file="${exported.dir}/${batch_zip}"/>
+		<zip destfile="${exported.dir}/${batch_zip}">
+			<zipfileset dir="${exported.dir}/zip"/>
+		</zip>
+		
+		<!-- nettoyage des sous-répertoires -->
+		<delete dir="${exported.dir}/zip"/>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier Zip n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	<record name="${log.dir}/makeZip.log" action="stop" />
+  </target>
+
+
+	<target name="make">
+		<antcall target="makeZip"/>
+	</target>
+
+</project>

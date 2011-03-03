@@ -1,0 +1,496 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="reassemblageSrtS" default="make" basedir="../.">
+
+	<!-- Ajout d'un package pour utiliser le task IF -->
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+
+
+	<!-- *********************************************************************
+	Ce script permet de packager l'application StreamServe
+	le résultat du script se trouve dans le répertoire exported.dir. Il s'agit d'un zip
+		
+	Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set CVSHOME=D:\Programs\WinCvs
+
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%CVSHOME%
+
+	Ce script attend en paramètre :
+
+	OBLIGATOIRES
+		cvs.module 	: nom COMPLET du module CVS à récupérer contenant les livraisons
+		cvs.lot 		: lot du module à récupérer (ex. Lot3.0).
+		cvs.tag 		: version du module à récupérer (ex. LIV_3_0_18).
+
+		origine			: environnement source (ex. dev)
+		cible 			: environnement cible (ex : rec30)
+
+	OPTIONNELS
+		cvs.context	: context source issu de l'assemblage. Par défaut égal à "StreamServe"
+		etape : etape de démmarrage du script. Pas de valeur par défaut (=> 1)
+
+		strsArchiveDSN	: Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+		UserClassPath		: Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+		outputCenter.url: Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+		odbc.batch			: Y si on souhaite décommenter ce paramètre du fichier streamserve_batch.arg. N par défaut.
+		javaOption :  Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+		outPutCenter.user :  Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+		outPutCenter.password :  Y si on souhaite modifier ce paramètre du fichier plateform.dua. N par défaut.
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f reassemblageSrtS.xml -Dcvs.module=livraisons -Dcvs.tag=LIV_3_0_18 -Dcvs.lot=Lot3.0 -Detape=1 -Dcible=rec50
+
+	*********************************************************************
+	-->
+
+	<!-- propriétés pour le déroulement des étapes du script -->
+	<property name="oui" value="Y"/>
+	<property name="non" value="N"/>
+	<property name="etapeAutorisee" value="${oui}"/>
+	<property name="etapeNonAutorisee" value="${non}"/>
+
+
+	<!--
+	*********************************************************************
+	Initialisations
+	*********************************************************************
+	-->
+	<target name="init" depends="">
+
+	<!-- ExecDir -->
+	<if>
+		<not><isset property="${execDir}"/></not>
+	<then>
+			<property name="execDir" value="${basedir}"/>
+	</then>
+	</if>
+	<property name="root" value="${execDir}"/>
+
+	<!-- xmlCommunDir -->
+	<if>
+		<not><isset property="${xmlCommunDir}"/></not>
+	<then>
+		<property name="xmlCommunDir" value="${basedir}/scripts"/>
+	</then>
+	</if>
+	<property name="script.xml.commun.dir" value="${xmlCommunDir}"/>
+
+	<property name="temp.dir" value="${root}/tmpStrs"/>
+	<property name="cvs.dir" value="${temp.dir}/projet"/>
+	<property name="projet.dir" value="${cvs.dir}"/>
+	<property name="parametrage.dir" value="${root}/parametrage"/>
+	<!--<property name="parametrage.file" value="${parametrage.dir}/parametrageStrs.properties"/>-->
+
+	<!--
+	*********************************************************************
+	Le répertoire de log et le fichier log du script
+	*********************************************************************
+	-->
+		<buildnumber file="${basedir}/build.number"/>
+		<tstamp>
+			<format property="TODAY_UK" pattern="d-MMMM-yyyy hh:mm:ss" locale="en"/>
+		</tstamp>
+
+	<property name="log.dir" value="${temp.dir}/log/streamserve.${build.number}"/>
+	<property name="log.file" value="${log.dir}/assemblageStreamServe.log"/>
+	<property name="plateform.file" value="${cvs.dir}/zip/Platforms/platform.dua"/>
+	<property name="plateform_batch.file" value="${cvs.dir}/zip/Platforms/platform_batch.dua"/>
+	<property name="argument_http.file" value="${cvs.dir}/zip/streamserve_http.arg"/>
+	<property name="argument_batch.file" value="${cvs.dir}/zip/streamserve_batch.arg"/>
+
+	<!-- creation du répertoire et du fichier de log général -->
+	<available file="${log.dir}" type="dir" property="log.lib.present"/>
+	
+	<if>
+		<not>
+			<equals arg1="${log.dir.present}" arg2="true" />
+		</not>
+		<then>
+			<!--<delete dir="${log.dir}"/>-->
+			<mkdir dir="${log.dir}"/>
+		</then>
+	</if>
+
+	<!-- récuperation du paramétrage spécifique à la PF-->
+	<!--<available file="${parametrage.file}" property="parametrage.present" />
+	<if>
+		<equals arg1="${parametrage.present}" arg2="true" />
+		<then>
+			<loadproperties srcFile="${parametrage.file}"/>
+		</then>
+		<else>
+			<fail message="le fichier ${parametrage.file} est introuvable"/>
+		</else>
+	</if>-->
+
+	<echo file="${log.file}" append="true">
+	*********************************************************************
+		Lancement du script de réassemblage de l'application StreamServe
+	*********************************************************************
+	property.file=${property.file}
+	</echo>
+
+	<!-- chargement d'un éventuel fichier properties avec les paramètres de lancement-->
+	<if>
+		<equals arg1="${property.file.dir}" arg2="$${property.file.dir}"/>
+	<then>
+		<property name="property.file.dir" value="scripts"/>
+	</then>
+	</if>
+
+	<available file="${root}/${property.file.dir}/${property.file}" property="property.file.present" />
+	<if>
+		<equals arg1="${property.file.present}" arg2="true" />
+		<then>
+			<echo file="${log.file}" append="true">
+			Utilisation du fichier ${property.file}
+			</echo>
+			<loadproperties srcFile="${root}/${property.file.dir}/${property.file}"/>
+		</then>
+		<else>
+			<echo file="${log.file}" append="true">
+			Pas de fichier de propriétés dans ${root}\${property.file.dir}
+			</echo>
+		</else>
+	</if>
+
+
+	<!--
+		*********************************************************************
+		Paramètres obligatoires et optionnels
+		*******************************************************************
+	-->
+	<if>
+		<or>
+		<equals arg1="${cvs.basemodule}" arg2="$${cvs.basemodule}" />
+		<equals arg1="${cvs.lot}" arg2="$${cvs.lot}" />
+		<equals arg1="${cvs.tag}" arg2="$${cvs.tag}" />
+		<equals arg1="${origine}" arg2="$${origine}" />
+		<equals arg1="${cible}" arg2="$${cible}" />
+		</or>
+		<then>
+			<fail message="un des paramètres obligatoires est absent (cvs.tag, cvs.lot, cvs.basemodule, cible, origine)"/>
+		</then>
+	</if>
+
+	<if>
+		<equals arg1="${cvs.context}" arg2="$${cvs.context}"/>
+		<then>
+			<property name="cvs.context" value="StreamServe"/>
+		</then>
+	</if>
+	
+	<if>
+		<equals arg1="${strsArchiveDSN}" arg2="$${strsArchiveDSN}"/>
+		<then>
+			<property name="strsArchiveDSN" value="${non}"/>
+		</then>
+	</if>
+	<if>
+		<equals arg1="${UserClassPath}" arg2="$${UserClassPath}"/>
+		<then>
+			<property name="UserClassPath" value="${non}"/>
+		</then>
+	</if>
+	<if>
+		<equals arg1="${outputCenter.url}" arg2="$${outputCenter.url}"/>
+		<then>
+			<property name="outputCenter.url" value="${non}"/>
+		</then>
+	</if>
+	<if>
+		<equals arg1="${odbc.batch}" arg2="$${odbc.batch}"/>
+		<then>
+			<property name="odbc.batch" value="${non}"/>
+		</then>
+	</if>
+
+	<property name="streamserve_zip" value="${cvs.context}.zip"/>
+	<property name="streamserve.specifique_zip" value="${cvs.context.client}.zip"/>
+	<property name="projet.strs.dir" value="${cvs.dir}/${cvs.basemodule}/${cvs.lot}/${cvs.tag}/streamserve"/>
+	<property name="module.dir" value="streamserve"/>
+
+	<!--Etapes du scripts. A executer dans l'ordre -->
+	<echo file="${log.file}" append="true">
+		Etape de démarrage du script : ${etape}
+	</echo>
+	<switch value="${etape}">
+		<case value="2">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="3">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+			<property name="etape2" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="4">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+			<property name="etape2" value="${etapeNonAutorisee}" />
+			<property name="etape3" value="${etapeNonAutorisee}" />
+		</case>
+		<case value="5">
+			<property name="etape1" value="${etapeNonAutorisee}" />
+			<property name="etape2" value="${etapeNonAutorisee}" />
+			<property name="etape3" value="${etapeNonAutorisee}" />
+			<property name="etape4" value="${etapeNonAutorisee}" />
+		</case>
+		<default>
+			<echo file="${log.file}" append="true">
+				=> Cas par défaut. Toutes les étapes du script seront exécutées
+			</echo>
+		</default>
+	</switch>
+	<!--
+	les property qui n'auraient pas été valuées précédemment le sont à présent.
+	La valeur mise fait en sorte que l'étape est autorisée.
+	-->
+	<property name="etape1" value="${etapeAutorisee}"/>
+	<property name="etape2" value="${etapeAutorisee}"/>
+	<property name="etape3" value="${etapeAutorisee}" />
+	<property name="etape4" value="${etapeAutorisee}" />
+	<property name="etape5" value="${etapeAutorisee}" />
+	
+	<!-- Contrôle sur le paramètre cvs.context.client -->
+	<if>
+		<equals arg1="${etape3}" arg2="Y" />
+		<then>
+			<if>
+				<equals arg1="${cvs.context.client}" arg2="$${cvs.context.client}"/>
+				<then>
+					<fail message="Le paramètres obligatoire cvs.context.client est absent"/>
+				</then>
+			</if>
+		</then>
+	</if>
+
+	</target>
+
+
+	<!--
+	*********************************************************************
+	ETAPE 1 - Récupération du zip depuis le répertoire d'assemblage
+	*********************************************************************
+	-->
+	<target name="getFromCVS" depends="init">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+ 			ETAPE 1 : Récupération de la livraison depuis CVS
+		*********************************************************************
+	</echo>
+	<if>
+ 		<equals arg1="${etape1}" arg2="${etapeAutorisee}" />
+	<then>
+		<ant antfile="${script.xml.commun.dir}/getCibleFromCVS.xml" inheritall="true">
+			<property name="cvs.module" value="${module.dir}"/>
+			<property name="CvsProjetDir" value="${cvs.dir}"/>
+			<property name="CvsVersion" value="${source.versionCVS}"/>			
+		</ant>
+
+		<echo file="${log.file}" append="true">
+			La version ${cvs.tag} a été récupérée
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			les binaires de l'application ${module.dir} n'ont pas été récupérés
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 2 : 	Unzip du zip streamserve produit
+	 ********************************************************************
+	-->
+	<target name="unzipStrs" depends="getFromCVS">
+		<echo file="${log.file}" append="true">
+		********************************************************************************
+		ETAPE 2 :	Unzip du zip streamserve produit
+		*******************************************************************************
+		</echo>
+		<if>
+			<equals arg1="${etape2}" arg2="${etapeAutorisee}" />
+		<then>
+			<!-- unzip du binaire -->
+			<unzip	src="${projet.strs.dir}/${streamserve_zip}" dest="${cvs.dir}/zip">
+			</unzip>
+			
+			<echo file="${log.file}" append="true">
+				unzip OK
+			</echo>
+		</then>
+		</if>
+	</target>
+	
+	<!--
+	*********************************************************************
+	ETAPE 3: 	Unzip du zip streamserve spécifique
+	 ********************************************************************
+	-->
+	<target name="unzipStrsClient" depends="unzipStrs">
+		<echo file="${log.file}" append="true">
+		********************************************************************************
+		ETAPE 3 :	Unzip du zip streamserve spécifique
+		*******************************************************************************
+		</echo>
+		<if>
+			<equals arg1="${etape3}" arg2="${etapeAutorisee}" />
+		<then>
+			<!-- unzip du binaire -->
+			<unzip	src="${projet.strs.dir}/${streamserve.specifique_zip}" dest="${cvs.dir}/zip">
+			</unzip>
+			
+			<echo file="${log.file}" append="true">
+				unzip OK
+			</echo>
+		</then>
+		</if>
+	</target>
+	
+	<!--
+	*********************************************************************************************
+	ETAPE 4  : 	Modification des fichiers de paramétrage en fonction de la plate-forme
+	 ********************************************************************************************
+	-->
+	<target name="modifyZIP" depends="unzipStrsClient">
+		<echo file="${log.file}" append="true">
+		***********************************************************************************
+		ETAPE 4 :	Modification des fichiers de paramétrage en fonction de la plate-forme
+		***********************************************************************************
+		</echo>
+		<if>
+			<equals arg1="${etape4}" arg2="${etapeAutorisee}" />
+		<then>
+			<echo>gestionParametrageCentralise = ${gestionParametrageCentralise}</echo>
+			
+			<available file="${parametrage.dir}/parametrage${appli.type}.properties" property="module.streamserve.property.file"/>
+			
+			<if>
+				<and>
+					<equals arg1="${gestionParametrageCentralise}" arg2="true" />
+					<equals arg1="${module.streamserve.property.file}" arg2="true" />
+				</and>
+			<then>
+				<if>
+					<not>
+						<isset property="params.file"/>
+					</not>
+					<then>
+						<property name="params.file" value="parametrage${appli.type}.properties"/>
+					</then>
+				</if>
+					
+				<ant antfile="${script.xml.commun.dir}/parametrageFichier.xml" inheritall="true">
+					<property name="source.dir" value="${cvs.dir}/zip"/>
+					<property name="cible.dir" value="${cvs.dir}/zip"/>
+					<property name="params.dir" value="${parametrage.dir}"/>
+					<property name="appli.brique" value="zip" />
+				</ant>
+			
+				<echo file="${log.file}" append="true">
+				==> source.dir = cible.dir = ${exported.dir}/ear/properties
+				==> params.dir = ${parametrage.dir}
+				==> params.file = ${params.file}
+				==> appli.type = ${appli.type}
+				==> appli.brique = ${appli.brique}
+				</echo>
+			</then>
+			</if>
+			
+			<!--
+			*********************************************
+			parametrage des fichiers arguments
+			*********************************************
+			-->
+			<!--<if>
+				<equals arg1="${odbc.batch}" arg2="${oui}"/>
+				<then>
+					<replace file="${argument_batch.file}" propertyFile="${parametrage.file}">
+						<replacefilter token="//-odbc" value="-odbc"/>
+					</replace>
+					<echo file="${log.file}" append="true">
+					le parametrage odbc a été activé dans le fichier argument des batchs
+					</echo>
+				</then>
+			</if>			
+			
+			<if>
+				<equals arg1="${odbc.http}" arg2="${oui}"/>
+				<then>
+					<replace file="${argument_http.file}" propertyFile="${parametrage.file}">
+						<replacefilter token="//-odbc" value="-odbc"/>
+					</replace>
+					<echo file="${log.file}" append="true">
+					le parametrage odbc a été activé dans le fichier argument http
+					</echo>
+				</then>
+			</if>-->
+
+			<!--
+			*********************************************
+			écrasement du fichier langue2.sls si présent
+			*********************************************
+			-->
+			<!--<available file="${parametrage.dir}/Langue2.sls" property="langue2.present"/>
+			<if>
+				<equals arg1="${langue2.present}" arg2="true" />
+			<then>
+				<copy file="${parametrage.dir}/Langue2.sls" tofile="${cvs.dir}/zip/data/tables/Langue2.sls" overwrite="true"/>
+				<echo file="${log.file}" append="true">
+				le fichier Langue2.sls a été modifié
+				</echo>
+			</then>
+			</if>-->
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			Les paramétres liées à la plateforme ont été modifiées
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<!--
+	*********************************************************************
+	ETAPE 5 : Création du zip
+	*********************************************************************
+	-->
+	<target name="makeZip" depends="modifyZIP">
+	<echo file="${log.file}" append="true">
+		*********************************************************************
+			ETAPE 5 :	Création du ZIP.
+		*********************************************************************
+	</echo>
+	<if>
+		<equals arg1="${etape5}" arg2="${etapeAutorisee}" />
+	<then>
+	
+		<!-- constitution du zip des batchs -->
+		<delete file="${root}/${streamserve_zip}"/>
+		<zip destfile="${root}/${streamserve_zip}">
+			<zipfileset dir="${cvs.dir}/zip"/>
+		</zip>
+		
+		<!-- nettoyage des sous-répertoires -->
+		<delete dir="${cvs.dir}/zip"/>
+		
+		<echo file="${log.file}" append="true">
+			OK
+		</echo>
+	</then>
+	<else>
+		<echo file="${log.file}" append="true">
+			le fichier Zip n'a pas été créé
+		</echo>
+	</else>
+	</if>
+	</target>
+
+	<target name="make">
+		<antcall target="makeZip"/>
+	</target>
+
+</project>
