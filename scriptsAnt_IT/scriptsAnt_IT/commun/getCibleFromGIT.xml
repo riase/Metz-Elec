@@ -6,7 +6,8 @@
 		
 	<!-- Ajout d'un package pour utiliser le task unset -->
 	<taskdef name="unset" classname="ise.antelope.tasks.Unset" />
-
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+	
 	<!-- *********************************************************************
   Ce script permet de récupérer des cibles archivées sous GIT
 

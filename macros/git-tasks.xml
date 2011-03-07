@@ -10,6 +10,19 @@
 		======================================================================
 	-->
 <project>
+
+<property environment="env"></property>
+
+<!-- 
+  Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set GITHOME=C:\msysgit\msysgit
+		
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%GITHOME%
+-->
+
 	<!--
 		= = = = = = = = = = = = = = = = = macrodef: git = = = = = = = = = = =
 		= = = = = =
@@ -19,9 +32,10 @@
 		<attribute name="dir" default="" />
 		<element name="args" optional="true" />
 		<sequential>
-			<echo file="GIT_COMMAND_LOG" message="git @{command} &#xa;"
+			<echo file="GIT_COMMAND_LOG" message="git @{command} @{dir} @{args} &#xa;"
 				append="yes" />
-			<exec executable="git" dir="@{dir}">
+			<exec executable="${env.GITHOME}\bin\git.exe" dir="@{dir}">
+				<env key="PATH" path="${env.PATH}:${env.GITHOME}/mingw/bin"/>			
 				<arg value="@{command}" />
 				<args />
 			</exec>
@@ -63,7 +77,9 @@
 		<attribute name="repository" />
 		<attribute name="dest" />
 		<sequential>
-			<git command="clone">
+			<echo file="GITCLONE_COMMAND_LOG" message="git clone @{repository} @{dest} &#xa;"
+				append="yes" />
+			<git command="clone" dir="@{dest}" >
 				<args>
 					<arg value="@{repository}" />
 					<arg value="@{dest}" />
