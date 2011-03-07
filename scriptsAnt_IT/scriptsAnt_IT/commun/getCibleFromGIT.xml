@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="ISO-8859-1" ?>
 <project name="getCibleFromGIT" default="make" basedir="../.">
 
-	<property name="git.tasks.macro" location="./macros/git-tasks.xml" />
+	<property name="git.tasks.macro" location="../macros/git-tasks.xml" />
 	<import file="${git.tasks.macro}" />
 		
 	<!-- Ajout d'un package pour utiliser le task unset -->
@@ -90,7 +90,7 @@ FACULTATIFS
 				<property name="GIT.repo" value="/DEV" />
 			</then>
 		</if>
-		<property name="GIT.root" value="git://${GIT.server}/${GIT.repo}" />
+		<property name="GIT.root" value="git://${GIT.server}/${GIT.repo}/${GIT.module}" />
 		<if>
 			<equals arg1="${GITVersion}" arg2="$${GITVersion}" />
 			<then>
@@ -111,20 +111,16 @@ FACULTATIFS
 
 		<delete dir="${GIT.dir}" />
 		<mkdir dir="${GIT.dir}" />
-		<!-- Pour le moment on ne gère que les checkouts de la branche stable et pas les tags -->
-		<git-clone-pull repository="${GIT.root}" dest="${GIT.dir}" />
 
-			<!--
 		<if>
 			<equals arg1="${GITVersion}" arg2="LAST" />
 			<then>
-				<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}" />
+				<git-clone-pull repository="${GIT.root}" dest="${GIT.dir}" />
 			</then>
 			<else>
-				<GIT GITRoot="${GIT.root}" package="${GIT.basemodule}\${GIT.lot}\${GIT.tag}\${GIT.module}" quiet="yes" dest="${GIT.dir}" tag="${GITVersion}" />
+				<git-clone-pull repository="${GIT.root}/${GITVersion}" dest="${GIT.dir}" />
 			</else>
 		</if>
-			-->
 
 	</target>
 

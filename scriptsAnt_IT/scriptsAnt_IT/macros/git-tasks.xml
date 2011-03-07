@@ -77,8 +77,6 @@
 		<attribute name="repository" />
 		<attribute name="dest" />
 		<sequential>
-			<echo file="GITCLONE_COMMAND_LOG" message="git clone @{repository} @{dest} &#xa;"
-				append="yes" />
 			<git command="clone" dir="@{dest}" >
 				<args>
 					<arg value="@{repository}" />
