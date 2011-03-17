@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<project name="getCibleFromGIT" default="make" basedir="../.">
+
+	<property name="git.tasks.macro" location="../macros/git-tasks.xml" />
+	<import file="${git.tasks.macro}" />
+		
+	<!-- Ajout d'un package pour utiliser le task unset -->
+	<taskdef name="unset" classname="ise.antelope.tasks.Unset" />
+	<taskdef resource="net/sf/antcontrib/antcontrib.properties"/>
+	
+	<!-- *********************************************************************
+  Ce script permet de récupérer des cibles archivées sous GIT
+
+  Avant de lancer le script fixer les paramètres d'environnement.
+
+		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
+		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
+		set GITHOME=C:\msysgit\msysgit
+		
+		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%GITHOME%
+
+
+  Ce script attend en paramètre :
+
+  OBLIGATOIRES
+	GIT.basemodule : nom COMPLET de la base module GIT à récupérer contenant les livraisons
+
+  	GIT.lot : lot du module à récupérer (LIV_2_1_14 par ex).
+
+  	GIT.tag : version du module à récupérer (LIV_2_1_14 par ex).
+
+	GIT.module : nom du module GIT à récupérer contenant la livraison
+
+FACULTATIFS
+	ExecDir						: Répertoire absolu d'exécution
+	GITTempDir					: Répertoire cible de l'extraction des sources GIT
+	GIT.login					: login pour se connecter à GIT. Par défaut adminDEV
+	GIT.server				: serveur hébergeant la base GIT. Par défaut hermesGIT
+	GIT.repo					: repository où sont les sources. Par défaut /DEV
+	Ces trois paramètres peuvent être remplacé par un paramètre global (GIT.root=git://${GIT.server}/${GIT.repo})
+
+	La chaîne de lancement est donc (par exemple)
+
+	ant -f getCibleFromGIT.xml -DGIT.basemodule=livraisons -DGIT.module=j2ee/application/hermessp1 -DGIT.lot=Lot3.0 -DGIT.tag=LIV_2_1_14
+
+	*********************************************************************
+	-->
+
+	<target name="init" depends="">
+
+		<!-- ExecDir -->
+		
+		<if>
+			<not>
+				<isset property="${execDir}" />
+			</not>
+			<then>
+				<property name="execDir" value="${basedir}" />
+			</then>
+		</if>
+		
+		<property name="root" value="${execDir}" />
+
+		<!-- GITProjetDir -->
+		<if>
+			<equals arg1="${GITProjetDir}" arg2="$${GITProjetDir}" />
+			<then>
+				<property name="GITProjetDir" value="${root}/tmp/projet" />
+			</then>
+		</if>
+		<unset name="GIT.dir" />
+		<!-- Dans le cas où on fait appel consécutivement au script getCibleFromGIT.xml dans un autre script -->
+		<property name="GIT.dir" value="${GITProjetDir}" />
+
+		<if>
+			<equals arg1="${GIT.login}" arg2="$${GIT.login}" />
+			<then>
+				<property name="GIT.login" value="adminDEV" />
+			</then>
+		</if>
+		<if>
+			<equals arg1="${GIT.server}" arg2="$${GIT.server}" />
+			<then>
+				<property name="GIT.server" value="hermesGIT" />
+			</then>
+		</if>
+		<if>
+			<equals arg1="${GIT.repo}" arg2="$${GIT.repo}" />
+			<then>
+				<property name="GIT.repo" value="/DEV" />
+			</then>
+		</if>
+		<property name="GIT.root" value="git://${GIT.server}/${GIT.repo}/${GIT.module}" />
+		<if>
+			<equals arg1="${GITVersion}" arg2="$${GITVersion}" />
+			<then>
+				<property name="GITVersion" value="LAST" />
+			</then>
+		</if>
+
+		<echo file="${log.file}" append="true">
+	La chaine de connexion a GIT est : ${GIT.root}
+	Les sources GIT proviennent de : ${GIT.module}
+	en version (tag): ${GITVersion} 
+	</echo>
+
+	</target>
+
+
+	<target name="getCibleFromGIT" depends="init">
+
+		<delete dir="${GIT.dir}" />
+		<mkdir dir="${GIT.dir}" />
+
+		<if>
+			<equals arg1="${GITVersion}" arg2="LAST" />
+			<then>
+				<git-clone-pull repository="${GIT.root}" dest="${GIT.dir}" />
+			</then>
+			<else>
+				<git-clone-pull repository="${GIT.root}/${GITVersion}" dest="${GIT.dir}" />
+			</else>
+		</if>
+
+	</target>
+
+
+	<target name="make">
+		<antcall target="getCibleFromGIT" />
+	</target>
+
+</project>
