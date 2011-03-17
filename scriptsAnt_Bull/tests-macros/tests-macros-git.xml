@@ -12,6 +12,7 @@
 		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
 		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
 		set GITHOME=C:\msysgit\msysgit
+		set GIT_SSH=D:\Logiciels\Putty\plink.exe
 		
 		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%GITHOME%
 
@@ -38,7 +39,7 @@
 	 	4) le nom de la branche locale qui sera créer
 
 		La chaîne de lancement pourra être :	 	
-	 	ant -f tests-macros-git.xml -Dgit.repository=git://github.com/riase/Metz-Elec.git -Dgit.dest=C:\Temp\tmp -Dgit.remotebranchname=branche1 -Dgit.localbranchname=branche1	 
+	 	ant -f tests-macros-git.xml -Dgit.repository=git://github.com/riase/Metz-Elec.git -Dgit.dest=C:\Temp\tmp -Dgit.remotebranchname=branche1 -Dgit.localbranchname=branche1	 git-clone-pull
 -->
 		<delete dir="${git.dest}" />
 		<mkdir dir="${git.dest}"/>
@@ -48,7 +49,27 @@
 		/>
 
 </target>
-	
+
+	<target name="git-branch" depends="init">
+<!-- ce test permet de créer une branche sur un repository GIT distant.
+	 La macro prend en paramètre :
+	 	1) l'url du repository (url avec un format ssh pour la publication)
+	 	. Par exemple :
+	 		 git@github.com:riase/Metz-Elec.git
+	 	2) le répertoire local du repository GIT
+	 	3) le nom de la branche local à uploader	 	
+	 	4) le nom de la branche distante à créer
+
+		La chaîne de lancement pourra être :	 	
+	 	ant -f tests-macros-git.xml -Dgit.repository=git@github.com:riase/Metz-Elec.git -Dgit.localrepository=C:\Temp\tmp -Dgit.remotebranchname=branche1 -Dgit.localbranchname=branche1 git-branch 
+-->
+		
+		<git-branch url.push="${git.repository}" localrepositorypath="${git.localrepository}" 
+						remotebranchname="${remotebranchname}" localbranchname="${localbranchname}"
+		/>
+
+</target>
+
 	<target name="make">
 		<antcall target="git-clone-pull" />
 	</target>
