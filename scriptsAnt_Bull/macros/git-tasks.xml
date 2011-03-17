@@ -157,8 +157,9 @@
 		</sequential>
 	</macrodef>
 	<macrodef name="git-branch">
-		<!-- path est le path de la branche locale -->
-		<!-- branch est le nom de la branche à créer en remote -->
+		<!-- localrepositorypath est le path du repository GIT local -->
+		<!-- localbranchname est le nom de la branche locale -->
+		<!-- remotebranchname est le nom de la branche remote à créer -->
 		<!-- url.push est l'URL git pour faire des push -->
 		<attribute name="localrepositorypath" />
 		<attribute name="localbranchname" />
@@ -191,30 +192,37 @@
 		</sequential>
 	</macrodef>
 	<macrodef name="git-tag">
-		<!-- path est le path de la branche locale -->
-		<!-- branch est le nom de la branche à créer en remote -->
+		<!-- localrepositorypath est le path du repository GIT local -->
+		<!-- localtagname est le nom du tag local -->
+		<!-- remotetagname est le nom du tag remote à créer -->
 		<!-- url.push est l'URL git pour faire des push -->
-		<attribute name="path" />
-		<attribute name="tag" />
+		<!-- url.push est l'URL git pour faire des push -->
+		<attribute name="localrepositorypath" />
+		<attribute name="localtagname" />
+		<attribute name="remotetagname" />
 		<attribute name="url.push" />
 		<sequential>
-			<git command="tag" dir="@{path}">
+			<git command="tag" dir="@{localrepositorypath}">
 				<args>
-					<arg value="@{tag}" />
+					<arg value="@{localtagname}" />
 				</args>
 			</git>
-			<git command="remote" dir="@{path}" >
+
+			<git-remote-add branch="@{localtagname}" path="@{localrepositorypath}" repository="@{url.push}" >
+			</git-remote-add>
+
+			<git command="remote" dir="@{localrepositorypath}" >
 				<args>
 					<arg value="set-url" />
 					<arg value="--push" />
-					<arg value="origin" />
+					<arg value="@{localtagname}" />
 					<arg value="@{url.push}" />
 				</args>
 			</git>
-			<git command="push" dir="@{path}" >
+			<git command="push" dir="@{localrepositorypath}" >
 				<args>
-					<arg value="origin" />
-					<arg value="origin:refs/tags/@{tag}" />
+					<arg value="@{localtagname}" />
+					<arg value="@{remotetagname}:refs/tags/@{localtagname}" />
 				</args>
 			</git>
 		</sequential>

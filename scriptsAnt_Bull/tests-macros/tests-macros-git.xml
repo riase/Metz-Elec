@@ -3,7 +3,7 @@
 
 	<property name="git.tasks.macro" location="../macros/git-tasks.xml" />
 	<import file="${git.tasks.macro}" />
-			
+
 	<!-- *********************************************************************
   Ce script permet de tester les macros git
 
@@ -29,7 +29,7 @@
 
 
 	<target name="git-clone-pull" depends="init">
-<!-- ce test permet de faire un clone puis un pull sur une 
+		<!-- ce test permet de faire un clone puis un pull sur une 
 	 branche ou un tag d'un repository GIT distant.
 	 La macro prend en paramètre :
 	 	1) l'url du repository. Par exemple :
@@ -42,16 +42,14 @@
 	 	ant -f tests-macros-git.xml -Dgit.repository=git://github.com/riase/Metz-Elec.git -Dgit.dest=C:\Temp\tmp -Dgit.remotebranchname=branche1 -Dgit.localbranchname=branche1	 git-clone-pull
 -->
 		<delete dir="${git.dest}" />
-		<mkdir dir="${git.dest}"/>
-		
-		<git-clone-pull repository="${git.repository}" dest="${git.dest}" 
-						remotebranchname="${remotebranchname}" localbranchname="${localbranchname}"
-		/>
+		<mkdir dir="${git.dest}" />
 
-</target>
+		<git-clone-pull repository="${git.repository}" dest="${git.dest}" remotebranchname="${remotebranchname}" localbranchname="${localbranchname}" />
+
+	</target>
 
 	<target name="git-branch" depends="init">
-<!-- ce test permet de créer une branche sur un repository GIT distant.
+		<!-- ce test permet de créer une branche sur un repository GIT distant.
 	 La macro prend en paramètre :
 	 	1) l'url du repository (url avec un format ssh pour la publication)
 	 	. Par exemple :
@@ -63,12 +61,28 @@
 		La chaîne de lancement pourra être :	 	
 	 	ant -f tests-macros-git.xml -Dgit.repository=git@github.com:riase/Metz-Elec.git -Dgit.localrepository=C:\Temp\tmp -Dgit.remotebranchname=branche1 -Dgit.localbranchname=branche1 git-branch 
 -->
-		
-		<git-branch url.push="${git.repository}" localrepositorypath="${git.localrepository}" 
-						remotebranchname="${remotebranchname}" localbranchname="${localbranchname}"
-		/>
 
-</target>
+		<git-branch url.push="${git.repository}" localrepositorypath="${git.localrepository}" remotebranchname="${remotebranchname}" localbranchname="${localbranchname}" />
+
+	</target>
+
+	<target name="git-tag" depends="init">
+		<!-- ce test permet de créer un tag sur un repository GIT distant.
+	 La macro prend en paramètre :
+	 	1) l'url du repository (url avec un format ssh pour la publication)
+	 	. Par exemple :
+	 		 git@github.com:riase/Metz-Elec.git
+	 	2) le répertoire local du repository GIT
+	 	3) le nom du tag local à créer et uploader	 	
+	 	4) le nom du tag distant à créer
+
+		La chaîne de lancement pourra être :	 	
+	 	ant -f tests-macros-git.xml -Dgit.repository=git@github.com:riase/Metz-Elec.git -Dgit.localrepository=C:\Temp\tmp -Dgit.remotetagname=tag1 -Dgit.localtagname=tag1 git-tag 
+-->
+
+		<git-tag url.push="${git.repository}" localrepositorypath="${git.localrepository}" remotetagname="${remotetagname}" localtagname="${localtagname}" />
+
+	</target>
 
 	<target name="make">
 		<antcall target="git-clone-pull" />
