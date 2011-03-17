@@ -76,14 +76,23 @@
 	<macrodef name="git-clone-pull">
 		<attribute name="repository" />
 		<attribute name="dest" />
+		<attribute name="remotebranchname" />
+		<attribute name="localbranchname" />
 		<sequential>
 			<git command="clone" dir="@{dest}" >
 				<args>
+					<arg value="-b" />
+					<arg value="@{remotebranchname}" />
 					<arg value="@{repository}" />
-					<arg value="@{dest}" />
+					<arg value="@{localbranchname}" />
 				</args>
 			</git>
-			<git command="pull" dir="@{dest}" />
+			<git command="pull" dir="@{dest}/@{localbranchname}" >
+			<args>
+				<arg value="origin" />
+				<arg value="@{remotebranchname}:refs/heads/@{localbranchname}" />
+			</args>
+			</git>
 		</sequential>
 	</macrodef>
 	<!-- path est le path de la branche locale -->
