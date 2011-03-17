@@ -13,15 +13,6 @@
 
 <property environment="env"></property>
 
-<!-- 
-  Avant de lancer le script fixer les paramètres d'environnement.
-
-		set JAVA_HOME=d:\Programs\JBuilder9\jdk1.4
-		set ANT_HOME=D:\Programs\ant\apache-ant-1.5.3-1
-		set GITHOME=C:\msysgit\msysgit
-		
-		set PATH=%ANT_HOME%\bin;%JAVA_HOME%\bin;%GITHOME%
--->
 
 	<!--
 		= = = = = = = = = = = = = = = = = macrodef: git = = = = = = = = = = =
